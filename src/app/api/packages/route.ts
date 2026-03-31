@@ -35,7 +35,6 @@ export async function GET(request: NextRequest) {
     packages.map((p) => ({
       ...p,
       price: Number(p.price),
-      workshopPrice: Number(p.workshopPrice ?? 0),
       activePurchases: p._count.clientPackages,
     }))
   );

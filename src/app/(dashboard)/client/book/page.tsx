@@ -27,7 +27,7 @@ export default function BookPage() {
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [catFilter, setCatFilter] = useState("all");
 
-  const categories = [...new Set(sessions.map(s => s.category.name))];
+  const categories = Array.from(new Set(sessions.map(s => s.category.name)));
 
   useEffect(() => {
     const date = format(days[selectedDay], "yyyy-MM-dd");

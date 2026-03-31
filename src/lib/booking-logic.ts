@@ -376,7 +376,7 @@ export async function markAttendance(
   if (!booking) return { success: false, error: "Booking not found." };
 
   const settings = await getSettings(["credit_deduct_on", "no_show_loses_credit"]);
-  const deductOnAttendance = settings.credit_deduct_on === "attendance";
+  const deductOnAttendance = (settings.credit_deduct_on as string) === "attendance";
 
   const newStatus: BookingStatus = attended ? "attended" : "no_show";
 

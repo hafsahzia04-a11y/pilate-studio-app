@@ -58,7 +58,7 @@ export async function getSettings<K extends SettingKey>(
   const result = {} as { [key in K]: SettingValue<key> };
   for (const key of keys) {
     const row = rows.find((r) => r.key === key);
-    result[key] = row ? (row.value as SettingValue<key>) : SETTING_DEFAULTS[key];
+    result[key] = row ? (row.value as SettingValue<K>) : SETTING_DEFAULTS[key];
   }
   return result;
 }
