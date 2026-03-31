@@ -10,14 +10,14 @@ export function cn(...inputs: ClassValue[]) {
 // ─── Currency ────────────────────────────────────────────────────────────────
 export function formatCurrency(
   amount: number | string | { toNumber: () => number },
-  currency = "AED"
+  currency = "PKR"
 ): string {
   const num =
     typeof amount === "object" && "toNumber" in amount
       ? amount.toNumber()
       : Number(amount);
 
-  return new Intl.NumberFormat("en-AE", {
+  return new Intl.NumberFormat("en-PK", {
     style: "currency",
     currency,
     minimumFractionDigits: 0,

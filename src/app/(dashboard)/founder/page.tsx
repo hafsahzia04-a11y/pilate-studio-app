@@ -85,18 +85,10 @@ export default async function FounderDashboard() {
         expiryDate: { gte: now, lte: weekFromNow },
       },
     }),
-    // Low stock products
-    prisma.product.count({
-      where: {
-        isActive: true,
-        stockQuantity: { lte: prisma.product.fields.lowStockThreshold },
-      },
-    }).catch(() =>
-      // Fallback: fetch all and filter
-      prisma.product
-        .findMany({ where: { isActive: true }, select: { stockQuantity: true, lowStockThreshold: true } })
-        .then((ps) => ps.filter((p) => p.stockQuantity <= p.lowStockThreshold).length)
-    ),
+    // Low stock products — compare stockQuantity <= lowStockThreshold per row
+    prisma.product
+      .findMany({ where: { isActive: true }, select: { stockQuantity: true, lowStockThreshold: true } })
+      .then((ps) => ps.filter((p) => p.stockQuantity <= p.lowStockThreshold).length),
     // Recent 5 bookings
     prisma.booking.findMany({
       take: 5,
