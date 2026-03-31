@@ -1,0 +1,337 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CSS Custom Properties — Wellness Palette
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Cream / background */
+  --cream-50: #fdfcfa;
+  --cream-100: #faf8f5;
+  --cream-200: #f5f0ea;
+  --cream-300: #ede6dc;
+
+  /* Sage / primary brand */
+  --sage-50: #f4f7f4;
+  --sage-100: #e6ede6;
+  --sage-200: #c8d8c8;
+  --sage-300: #9cb89c;
+  --sage-400: #6b8f6b;
+  --sage-500: #4a7a4a;
+  --sage-600: #3a6b3a;
+  --sage-700: #2e5a2e;
+  --sage-800: #234523;
+  --sage-900: #1a341a;
+
+  /* Stone / text */
+  --stone-50: #fafaf9;
+  --stone-100: #f5f5f4;
+  --stone-200: #e7e5e4;
+  --stone-300: #d6d3d1;
+  --stone-400: #a8a29e;
+  --stone-500: #78716c;
+  --stone-600: #57534e;
+  --stone-700: #44403c;
+  --stone-800: #292524;
+  --stone-900: #1c1917;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.07),
+    0 10px 20px -2px rgba(0, 0, 0, 0.04);
+
+  /* Safe area for mobile bottom nav */
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Base Resets & Global Styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--cream-100);
+    color: var(--stone-900);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
+  }
+
+  /* Remove default button styles */
+  button {
+    cursor: pointer;
+  }
+
+  /* Remove list styles */
+  ul,
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Smooth focus outlines */
+  :focus-visible {
+    outline: 2px solid var(--sage-400);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Image defaults */
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  /* Headings */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--stone-900);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  /* Links */
+  a {
+    color: var(--sage-600);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Custom Scrollbar
+   ───────────────────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cream-200);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sage-300);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sage-400);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sage-300) var(--cream-200);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Safe Area
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.safe-area-bottom {
+  padding-bottom: calc(1rem + var(--safe-area-bottom));
+}
+
+.safe-area-bottom-nav {
+  padding-bottom: calc(4.5rem + var(--safe-area-bottom));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Component Utilities
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@layer components {
+  /* Card shadow utility */
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+
+  /* Horizontal scrollable container (date picker, category pills) */
+  .scroll-x-hidden {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scroll-x-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Glassmorphism effect */
+  .glass {
+    background: rgba(250, 248, 245, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* Text clamp utilities */
+  .line-clamp-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Animate in */
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.3s ease-out;
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.3s ease-out;
+  }
+
+  /* Page transitions */
+  .page-enter {
+    animation: fade-in 0.2s ease-out;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Keyframes
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-sage {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 122, 74, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(74, 122, 74, 0);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Form Elements
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  /* Remove number input spinners */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  /* Select element */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2378716C' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+  }
+
+  /* Checkbox & Radio */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--sage-500);
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Print Styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@media print {
+  body {
+    background: white;
+    color: black;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

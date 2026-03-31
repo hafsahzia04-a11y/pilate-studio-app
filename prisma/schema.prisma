@@ -1,0 +1,818 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// THE MOVEMENT STUDIO — Prisma Schema
+// Database: Supabase PostgreSQL (free tier)
+// ORM: Prisma 5 with Supabase connection pooler
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas   = ["public"]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  founder
+  staff
+  instructor
+  client
+
+  @@schema("public")
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+
+  @@schema("public")
+}
+
+enum PackageType {
+  membership   // Monthly rolling membership
+  pack         // Fixed credit pack (5, 10 classes)
+  drop_in      // Single class
+  founding     // Special founding member plan
+
+  @@schema("public")
+}
+
+enum ClientPackageStatus {
+  active
+  expired
+  paused
+  cancelled
+  pending_payment
+
+  @@schema("public")
+}
+
+enum PaymentStatus {
+  paid
+  partial
+  unpaid
+  overdue
+  refunded
+
+  @@schema("public")
+}
+
+enum PaymentMethod {
+  cash
+  card
+  bank_transfer
+  online
+  other
+
+  @@schema("public")
+}
+
+enum BookingStatus {
+  confirmed       // Booked, credit held
+  attended        // Physically attended
+  cancelled       // Cancelled within policy window → credit returned
+  late_cancelled  // Cancelled outside policy window → credit lost
+  no_show         // Never showed, never cancelled → credit lost (if configured)
+  waitlisted      // On waitlist, not yet in class
+
+  @@schema("public")
+}
+
+enum WaitlistStatus {
+  waiting
+  promoted
+  cancelled
+  expired
+
+  @@schema("public")
+}
+
+enum SessionStatus {
+  scheduled
+  cancelled
+  completed
+
+  @@schema("public")
+}
+
+enum ProductTransactionType {
+  purchased      // Client paid for it
+  complimentary  // From package perk (e.g. Premium 2/month)
+  adjusted       // Manual stock adjustment by founder/staff
+
+  @@schema("public")
+}
+
+enum NotificationChannel {
+  whatsapp
+  email
+  sms
+
+  @@schema("public")
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  failed
+
+  @@schema("public")
+}
+
+enum FreezStatus {
+  active    // Freeze is currently in effect
+  lifted    // Ended before original end_date
+  expired   // Ended on scheduled end_date
+
+  @@schema("public")
+}
+
+enum PayoutType {
+  per_class
+  hourly
+  revenue_share
+  fixed_monthly
+
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILES  (mirrors auth.users — created automatically via DB trigger)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Profile {
+  id        String     @id @db.Uuid  // = auth.users.id
+  fullName  String     @map("full_name")
+  email     String     @unique
+  phone     String?
+  role      UserRole   @default(client)
+  status    UserStatus @default(active)
+  avatarUrl String?    @map("avatar_url")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  clientProfile     ClientProfile?
+  instructorProfile InstructorProfile?
+
+  // Classes this instructor teaches
+  taughtSessions      ClassSession[]      @relation("InstructorSessions")
+  substituteSessions  ClassSession[]      @relation("SubstituteSessions")
+  recurringRules      RecurringRule[]
+
+  // Client relations
+  clientPackages      ClientPackage[]
+  bookings            Booking[]
+  waitlistEntries     WaitlistEntry[]
+  payments            Payment[]
+  productTransactions ProductTransaction[]
+  referralsGiven      Referral[]          @relation("ReferrerRelation")
+  referralsReceived   Referral[]          @relation("ReferredRelation")
+  membershipFreezes   MembershipFreeze[]
+
+  // Staff actions
+  paymentsRecorded    Payment[]           @relation("StaffPayments")
+  attendanceMarked    AttendanceLog[]     @relation("StaffAttendance")
+  productRedeemed     ProductTransaction[] @relation("StaffRedemptions")
+  auditLogs           AuditLog[]
+  notificationsLog    NotificationLog[]
+
+  @@map("profiles")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLIENT PROFILE  (extra fields for members)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClientProfile {
+  id                    String   @id @db.Uuid
+  profile               Profile  @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  dateOfBirth           DateTime? @map("date_of_birth") @db.Date
+  gender                String?
+  emergencyContactName  String?   @map("emergency_contact_name")
+  emergencyContactPhone String?   @map("emergency_contact_phone")
+  medicalNotes          String?   @map("medical_notes")     // Stored encrypted via Supabase vault ideally
+  injuryNotes           String?   @map("injury_notes")
+  studentIdUrl          String?   @map("student_id_url")    // Supabase Storage path
+  waiverSignedAt        DateTime? @map("waiver_signed_at")
+  membershipAgreementUrl String?  @map("membership_agreement_url")
+  tags                  String[]  @default([])              // ['founding_member','vip','student','overdue']
+  referralCode          String?   @unique @map("referral_code")
+  staffNotes            String?   @map("staff_notes")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("client_profiles")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTRUCTOR PROFILE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InstructorProfile {
+  id             String    @id @db.Uuid
+  profile        Profile   @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  bio            String?
+  specializations String[] @default([])  // ['yoga','pilates','strength']
+  payoutType     PayoutType @default(per_class) @map("payout_type")
+  payoutRate     Decimal    @default(0) @map("payout_rate") @db.Decimal(10, 2)
+  isAvailable    Boolean    @default(true) @map("is_available")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("instructor_profiles")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLASS CATEGORIES  (Yoga, Pilates, Strength, etc. — all editable)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClassCategory {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  color       String  @default("#6B8F6B")  // Used in UI calendar
+  icon        String?
+  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  templates ClassTemplate[]
+  sessions  ClassSession[]
+
+  @@map("class_categories")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLASS TEMPLATES  (reusable definitions — not the actual scheduled instance)
+// e.g. "Sunset Flow Yoga" is a template. Tuesday 18:30 is a session of it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClassTemplate {
+  id                      String        @id @default(cuid())
+  title                   String
+  categoryId              String        @map("category_id")
+  category                ClassCategory @relation(fields: [categoryId], references: [id])
+  description             String?
+  defaultDurationMins     Int           @default(60) @map("default_duration_mins")
+  bufferTimeMins          Int           @default(30) @map("buffer_time_mins")
+
+  // Credit / pricing behaviour
+  usesCredits             Boolean       @default(true) @map("uses_credits")
+  isWorkshop              Boolean       @default(false) @map("is_workshop")
+  workshopPrice           Decimal?      @map("workshop_price") @db.Decimal(10, 2)
+  workshopDiscountApplies Boolean       @default(true) @map("workshop_discount_applies")
+  beveragePerkApplies     Boolean       @default(true) @map("beverage_perk_applies")
+
+  isActive                Boolean       @default(true) @map("is_active")
+  sortOrder               Int           @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions       ClassSession[]
+  recurringRules RecurringRule[]
+
+  @@map("class_templates")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECURRING RULES  (defines a repeating weekly schedule)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RecurringRule {
+  id           String        @id @default(cuid())
+  templateId   String        @map("template_id")
+  template     ClassTemplate @relation(fields: [templateId], references: [id])
+  instructorId String        @map("instructor_id") @db.Uuid
+  instructor   Profile       @relation(fields: [instructorId], references: [id])
+
+  dayOfWeek    Int           @map("day_of_week")  // 0=Sun, 1=Mon … 6=Sat
+  startTime    String        @map("start_time")   // "HH:MM" — stored as text to avoid timezone issues
+  durationMins Int           @default(60) @map("duration_mins")
+  room         String?
+  capacity     Int           @default(12)
+
+  startsOn     DateTime      @map("starts_on") @db.Date
+  endsOn       DateTime?     @map("ends_on") @db.Date   // null = runs forever
+  isActive     Boolean       @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions ClassSession[]
+
+  @@map("recurring_rules")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLASS SESSIONS  (actual scheduled instances — what clients book)
+// One session = one class on one day at one time.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClassSession {
+  id                    String         @id @default(cuid())
+  templateId            String?        @map("template_id")
+  template              ClassTemplate? @relation(fields: [templateId], references: [id])
+  recurringRuleId       String?        @map("recurring_rule_id")
+  recurringRule         RecurringRule? @relation(fields: [recurringRuleId], references: [id])
+
+  // Can override template values for this specific session
+  title                 String
+  categoryId            String         @map("category_id")
+  category              ClassCategory  @relation(fields: [categoryId], references: [id])
+  description           String?
+  instructorId          String         @map("instructor_id") @db.Uuid
+  instructor            Profile        @relation("InstructorSessions", fields: [instructorId], references: [id])
+  substituteInstructorId String?       @map("substitute_instructor_id") @db.Uuid
+  substituteInstructor  Profile?       @relation("SubstituteSessions", fields: [substituteInstructorId], references: [id])
+
+  room                  String?
+  startTime             DateTime       @map("start_time")
+  endTime               DateTime       @map("end_time")
+  durationMins          Int            @default(60) @map("duration_mins")
+  bufferTimeMins        Int            @default(30) @map("buffer_time_mins")
+  capacity              Int            @default(12)  // Max 12; founder can change per session or globally
+
+  // Booking behaviour
+  usesCredits           Boolean        @default(true) @map("uses_credits")
+  isWorkshop            Boolean        @default(false) @map("is_workshop")
+  workshopPrice         Decimal?       @map("workshop_price") @db.Decimal(10, 2)
+  priceOverride         Decimal?       @map("price_override") @db.Decimal(10, 2)
+  workshopDiscountApplies Boolean      @default(true) @map("workshop_discount_applies")
+  beveragePerkApplies   Boolean        @default(true) @map("beverage_perk_applies")
+
+  status                SessionStatus  @default(scheduled)
+  cancellationReason    String?        @map("cancellation_reason")
+  cancelledAt           DateTime?      @map("cancelled_at")
+  cancelledById         String?        @map("cancelled_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  bookings     Booking[]
+  waitlist     WaitlistEntry[]
+  attendance   AttendanceLog[]
+
+  @@index([startTime])
+  @@index([instructorId])
+  @@index([status])
+  @@map("class_sessions")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PACKAGES  (membership plan definitions — ALL editable by founder)
+// This table holds the PRODUCT, not what a client has purchased.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Package {
+  id                      String      @id @default(cuid())
+  name                    String      @unique
+  type                    PackageType
+  description             String?
+  price                   Decimal     @db.Decimal(10, 2)
+  classCredits            Int         @map("class_credits")     // Credits per period
+  validityDays            Int         @map("validity_days")     // How long the package lasts
+
+  // Perks — all configurable
+  guestPassesPerPeriod    Int         @default(0) @map("guest_passes_per_period")
+  workshopDiscountPercent Int         @default(0) @map("workshop_discount_percent")
+  drinksPerPeriod         Int         @default(0) @map("drinks_per_period")   // Complimentary drinks/shots
+  bookingWindowHours      Int?        @map("booking_window_hours")             // null = standard advance booking
+  priorityBooking         Boolean     @default(false) @map("priority_booking")
+
+  // Founding member constraints
+  minCommitmentMonths     Int         @default(0) @map("min_commitment_months")  // 0 = no minimum
+  priceLockMonths         Int         @default(0) @map("price_lock_months")      // 0 = no lock
+  maxQuantity             Int?        @map("max_quantity")                        // null = unlimited
+  soldCount               Int         @default(0) @map("sold_count")
+
+  // Flags
+  requiresStudentId       Boolean     @default(false) @map("requires_student_id")
+  isFounding              Boolean     @default(false) @map("is_founding")
+  isActive                Boolean     @default(true) @map("is_active")
+  isVisible               Boolean     @default(true) @map("is_visible")         // Show in client portal?
+  sortOrder               Int         @default(0) @map("sort_order")
+
+  metadata                Json?       // Flexible extra fields without schema changes
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  clientPackages ClientPackage[]
+
+  @@map("packages")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLIENT PACKAGES  (what a specific client has purchased)
+// One row = one purchase. A client can have multiple (e.g. pack + membership).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClientPackage {
+  id        String  @id @default(cuid())
+  clientId  String  @map("client_id") @db.Uuid
+  client    Profile @relation(fields: [clientId], references: [id])
+  packageId String  @map("package_id")
+  package   Package @relation(fields: [packageId], references: [id])
+
+  // Dates
+  startDate  DateTime  @map("start_date") @db.Date
+  expiryDate DateTime  @map("expiry_date") @db.Date
+  renewalDate DateTime? @map("renewal_date") @db.Date  // For monthly memberships
+
+  // Credits — maintained in real time
+  totalCredits     Int     @map("total_credits")
+  usedCredits      Int     @default(0) @map("used_credits")
+  remainingCredits Int     @map("remaining_credits")       // = totalCredits - usedCredits, kept in sync
+
+  // Perks — reset monthly for memberships
+  guestPassesRemaining Int @default(0) @map("guest_passes_remaining")
+  drinksRemaining      Int @default(0) @map("drinks_remaining")
+  lastPerkResetDate    DateTime? @map("last_perk_reset_date") @db.Date
+
+  // Founding member locked price
+  lockedPrice Decimal? @map("locked_price") @db.Decimal(10, 2)
+  lockExpiresAt DateTime? @map("lock_expires_at") @db.Date
+
+  // Payment
+  amountPaid    Decimal       @default(0) @map("amount_paid") @db.Decimal(10, 2)
+  amountDue     Decimal       @map("amount_due") @db.Decimal(10, 2)
+  paymentStatus PaymentStatus @default(unpaid) @map("payment_status")
+  paymentDueDate DateTime?    @map("payment_due_date") @db.Date
+
+  // Status
+  status ClientPackageStatus @default(pending_payment)
+
+  // Pause / freeze tracking
+  pauseStart       DateTime? @map("pause_start") @db.Date
+  pauseEnd         DateTime? @map("pause_end") @db.Date
+  pauseReason      String?   @map("pause_reason")
+  originalExpiryBeforePause DateTime? @map("original_expiry_before_pause") @db.Date
+
+  // Notes
+  notes String?
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  createdById String? @map("created_by_id") @db.Uuid  // Staff who sold it
+
+  bookings         Booking[]
+  payments         Payment[]
+  productTransactions ProductTransaction[]
+  membershipFreezes MembershipFreeze[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([expiryDate])
+  @@index([paymentStatus])
+  @@map("client_packages")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOKINGS  (a client's reservation in a class session)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Booking {
+  id                String        @id @default(cuid())
+  clientId          String        @map("client_id") @db.Uuid
+  client            Profile       @relation(fields: [clientId], references: [id])
+  classSessionId    String        @map("class_session_id")
+  classSession      ClassSession  @relation(fields: [classSessionId], references: [id])
+  clientPackageId   String?       @map("client_package_id")     // Which package credit comes from
+  clientPackage     ClientPackage? @relation(fields: [clientPackageId], references: [id])
+
+  status            BookingStatus @default(confirmed)
+  creditDeducted    Boolean       @default(false) @map("credit_deducted")
+  creditRestored    Boolean       @default(false) @map("credit_restored")
+
+  // Guest pass bookings
+  isGuestBooking    Boolean       @default(false) @map("is_guest_booking")
+  guestName         String?       @map("guest_name")
+  guestPhone        String?       @map("guest_phone")
+
+  // Workshop cash top-up (if workshop costs extra beyond credit)
+  workshopCashAmount Decimal?     @map("workshop_cash_amount") @db.Decimal(10, 2)
+  workshopDiscountApplied Decimal? @map("workshop_discount_applied") @db.Decimal(10, 2)
+
+  notes             String?
+  cancellationReason String?      @map("cancellation_reason")
+  cancelledAt       DateTime?     @map("cancelled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  attendanceLog AttendanceLog?
+
+  @@unique([clientId, classSessionId])  // Prevents duplicate booking
+  @@index([classSessionId])
+  @@index([clientId])
+  @@index([status])
+  @@map("bookings")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WAITLIST  (ordered queue when class is full)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WaitlistEntry {
+  id             String         @id @default(cuid())
+  classSessionId String         @map("class_session_id")
+  classSession   ClassSession   @relation(fields: [classSessionId], references: [id])
+  clientId       String         @map("client_id") @db.Uuid
+  client         Profile        @relation(fields: [clientId], references: [id])
+  position       Int            // Lower = higher priority
+  status         WaitlistStatus @default(waiting)
+  promotedAt     DateTime?      @map("promoted_at")
+  expiresAt      DateTime?      @map("expires_at")  // Client has X hours to confirm after promotion
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([classSessionId, clientId])
+  @@index([classSessionId, status, position])
+  @@map("waitlist_entries")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATTENDANCE LOG  (final record of who actually showed up)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AttendanceLog {
+  id             String       @id @default(cuid())
+  bookingId      String       @unique @map("booking_id")
+  booking        Booking      @relation(fields: [bookingId], references: [id])
+  classSessionId String       @map("class_session_id")
+  classSession   ClassSession @relation(fields: [classSessionId], references: [id])
+
+  checkInTime    DateTime?    @map("check_in_time")
+  markedById     String?      @map("marked_by_id") @db.Uuid   // Staff or instructor ID
+  markedBy       Profile?     @relation("StaffAttendance", fields: [markedById], references: [id])
+  markedAt       DateTime     @default(now()) @map("marked_at")
+  notes          String?
+
+  @@index([classSessionId])
+  @@map("attendance_logs")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYMENTS  (every financial transaction)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Payment {
+  id              String        @id @default(cuid())
+  clientId        String        @map("client_id") @db.Uuid
+  client          Profile       @relation(fields: [clientId], references: [id])
+  clientPackageId String?       @map("client_package_id")
+  clientPackage   ClientPackage? @relation(fields: [clientPackageId], references: [id])
+
+  amount          Decimal       @db.Decimal(10, 2)
+  discountApplied Decimal       @default(0) @map("discount_applied") @db.Decimal(10, 2)
+  taxApplied      Decimal       @default(0) @map("tax_applied") @db.Decimal(10, 2)
+  netAmount       Decimal       @map("net_amount") @db.Decimal(10, 2)  // amount - discount + tax
+
+  paymentMethod   PaymentMethod @default(cash) @map("payment_method")
+  status          PaymentStatus @default(unpaid)
+  dueDate         DateTime?     @map("due_date") @db.Date
+  paidAt          DateTime?     @map("paid_at")
+
+  referenceNumber String?       @unique @map("reference_number")
+  notes           String?
+
+  recordedById    String?       @map("recorded_by_id") @db.Uuid
+  recordedBy      Profile?      @relation("StaffPayments", fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([clientId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("payments")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCTS  (wellness shots, beverages, retail items)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Product {
+  id                  String  @id @default(cuid())
+  name                String  @unique
+  description         String?
+  price               Decimal @db.Decimal(10, 2)
+  stockQuantity       Int     @default(0) @map("stock_quantity")
+  lowStockThreshold   Int     @default(5) @map("low_stock_threshold")
+  isActive            Boolean @default(true) @map("is_active")
+  imageUrl            String? @map("image_url")
+  category            String? // 'wellness_shot', 'beverage', 'retail', etc.
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  transactions ProductTransaction[]
+
+  @@map("products")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCT TRANSACTIONS  (every sale or perk redemption)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProductTransaction {
+  id              String                 @id @default(cuid())
+  clientId        String                 @map("client_id") @db.Uuid
+  client          Profile                @relation(fields: [clientId], references: [id])
+  productId       String                 @map("product_id")
+  product         Product                @relation(fields: [productId], references: [id])
+  clientPackageId String?                @map("client_package_id")
+  clientPackage   ClientPackage?         @relation(fields: [clientPackageId], references: [id])
+
+  type            ProductTransactionType
+  quantity        Int                    @default(1)
+  unitPrice       Decimal                @map("unit_price") @db.Decimal(10, 2)
+  totalAmount     Decimal                @map("total_amount") @db.Decimal(10, 2)
+
+  processedById   String?                @map("processed_by_id") @db.Uuid
+  processedBy     Profile?               @relation("StaffRedemptions", fields: [processedById], references: [id])
+  notes           String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([clientId])
+  @@index([productId])
+  @@map("product_transactions")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEMBERSHIP FREEZES  (pause a membership for a period)
+// Business rule: Expiry date is extended by the freeze duration.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MembershipFreeze {
+  id              String        @id @default(cuid())
+  clientId        String        @map("client_id") @db.Uuid
+  client          Profile       @relation(fields: [clientId], references: [id])
+  clientPackageId String        @map("client_package_id")
+  clientPackage   ClientPackage @relation(fields: [clientPackageId], references: [id])
+
+  freezeStart     DateTime      @map("freeze_start") @db.Date
+  freezeEnd       DateTime      @map("freeze_end") @db.Date
+  reason          String
+
+  originalExpiry  DateTime      @map("original_expiry") @db.Date
+  newExpiry       DateTime      @map("new_expiry") @db.Date    // Extended automatically
+
+  approvedById    String?       @map("approved_by_id") @db.Uuid
+  status          FreezStatus   @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([clientPackageId])
+  @@map("membership_freezes")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REFERRALS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Referral {
+  id          String  @id @default(cuid())
+  referrerId  String  @map("referrer_id") @db.Uuid
+  referrer    Profile @relation("ReferrerRelation", fields: [referrerId], references: [id])
+  referredId  String  @map("referred_id") @db.Uuid
+  referred    Profile @relation("ReferredRelation", fields: [referredId], references: [id])
+
+  rewardType  String  @map("reward_type")   // 'credit', 'discount', 'cash'
+  rewardValue Decimal @map("reward_value") @db.Decimal(10, 2)
+  status      String  @default("pending")   // 'pending', 'applied', 'cancelled'
+
+  createdAt DateTime @default(now()) @map("created_at")
+  appliedAt DateTime? @map("applied_at")
+
+  @@map("referrals")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STUDIO SETTINGS  (key-value store for all configurable business rules)
+// Examples: max_class_capacity, late_cancel_hours, credit_deduct_on, etc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model StudioSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("studio_settings")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT LOGS  (immutable — records every important change)
+// Never delete rows from this table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?  @map("actor_id") @db.Uuid
+  actor      Profile? @relation(fields: [actorId], references: [id])
+
+  action     String   // e.g. 'booking.created', 'package.updated', 'credit.adjusted'
+  entityType String   @map("entity_type")  // 'booking', 'client_package', 'payment', etc.
+  entityId   String   @map("entity_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATION LOG  (tracks every WhatsApp / email / SMS sent)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model NotificationLog {
+  id         String              @id @default(cuid())
+  clientId   String?             @map("client_id") @db.Uuid
+  client     Profile?            @relation(fields: [clientId], references: [id])
+
+  type       String              // 'booking_confirm', 'class_cancel', 'expiry_reminder', 'payment_due', 'promo'
+  channel    NotificationChannel @default(whatsapp)
+  phone      String?
+  email      String?
+  message    String
+  status     NotificationStatus  @default(pending)
+  errorMsg   String?             @map("error_msg")
+  sentAt     DateTime?           @map("sent_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([clientId])
+  @@index([status])
+  @@map("notification_logs")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTRUCTOR PAYOUT RECORDS  (workshop-specific payout logic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InstructorPayout {
+  id             String   @id @default(cuid())
+  instructorId   String   @map("instructor_id") @db.Uuid
+  classSessionId String   @map("class_session_id")
+
+  payoutType     PayoutType @map("payout_type")
+  baseRate       Decimal  @map("base_rate") @db.Decimal(10, 2)
+  attendeeCount  Int      @map("attendee_count")
+  totalAmount    Decimal  @map("total_amount") @db.Decimal(10, 2)
+
+  status         String   @default("pending")  // 'pending', 'approved', 'paid'
+  paidAt         DateTime? @map("paid_at")
+  notes          String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("instructor_payouts")
+  @@schema("public")
+}
