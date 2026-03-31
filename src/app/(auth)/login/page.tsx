@@ -52,9 +52,8 @@ export default function LoginPage() {
       return;
     }
 
-    // Middleware will handle role-based redirect
-    router.push("/");
-    router.refresh();
+    // Hard reload so middleware gets the session cookie on the first request
+    window.location.href = "/";
   }
 
   return (
