@@ -233,3 +233,32 @@ export async function PATCH(request: NextRequest) {
 
   return apiSuccess({ ...updated, price: Number(updated.price) });
 }
+
+// ── DELETE /api/inventory?id=xxx  — soft-delete a product ────────────────────
+export async function DELETE(request: NextRequest) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return apiError("Unauthorised", 401);
+
+  const actor = await prisma.profile.findUnique({ where: { id: user.id } });
+  if (actor?.role !== "founder") return apiError("Only founders can delete products", 403);
+
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return apiError("Product id required");
+
+  const product = await prisma.product.findUnique({ where: { id } });
+  if (!product) return apiError("Product not found", 404);
+
+  await prisma.product.update({ where: { id }, data: { isActive: false } });
+
+  await audit({
+    actorId: user.id,
+    action: AUDIT_ACTIONS.INVENTORY_ADJUSTED,
+    entityType: "product",
+    entityId: id,
+    oldValue: { isActive: true },
+    newValue: { isActive: false, deleted: true },
+  });
+
+  return apiSuccess({ deleted: true });
+}
