@@ -193,3 +193,43 @@ export async function POST(request: NextRequest) {
 
   return apiError("Invalid action. Use: create | restock | sell | redeem");
 }
+
+// ── PATCH /api/inventory  — edit product details ──────────────────────────────
+export async function PATCH(request: NextRequest) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return apiError("Unauthorised", 401);
+
+  const actor = await prisma.profile.findUnique({ where: { id: user.id } });
+  if (actor?.role !== "founder") return apiError("Only founders can edit products", 403);
+
+  const body = await request.json();
+  const { id, name, description, price, lowStockThreshold, category, isActive } = body;
+  if (!id) return apiError("Product id required");
+
+  const old = await prisma.product.findUnique({ where: { id } });
+  if (!old) return apiError("Product not found", 404);
+
+  const updated = await prisma.product.update({
+    where: { id },
+    data: {
+      ...(name !== undefined && { name }),
+      ...(description !== undefined && { description }),
+      ...(price !== undefined && { price: Number(price) }),
+      ...(lowStockThreshold !== undefined && { lowStockThreshold: Number(lowStockThreshold) }),
+      ...(category !== undefined && { category }),
+      ...(isActive !== undefined && { isActive }),
+    },
+  });
+
+  await audit({
+    actorId: user.id,
+    action: AUDIT_ACTIONS.INVENTORY_ADJUSTED,
+    entityType: "product",
+    entityId: id,
+    oldValue: { name: old.name, price: Number(old.price), category: old.category },
+    newValue: { name: updated.name, price: Number(updated.price), category: updated.category },
+  });
+
+  return apiSuccess({ ...updated, price: Number(updated.price) });
+}

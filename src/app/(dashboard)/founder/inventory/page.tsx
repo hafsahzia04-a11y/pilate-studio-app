@@ -5,8 +5,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { InventoryActions } from "./_components/InventoryActions";
-import { AlertTriangle } from "lucide-react";
+import { InventoryManager } from "./_components/InventoryActions";
 
 export const metadata = { title: "Inventory" };
 
@@ -32,47 +31,19 @@ export default async function InventoryPage() {
     take: 20,
   });
 
-  const lowStock = products.filter(p => p.stockQuantity <= p.lowStockThreshold);
-
   return (
     <DashboardLayout role={profile.role as "founder"} userName={profile.fullName} userEmail={profile.email} pageTitle="Inventory">
       <div className="space-y-5">
-        {lowStock.length > 0 && (
-          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
-            <p className="text-sm text-amber-700 font-medium">{lowStock.length} product{lowStock.length > 1 ? "s" : ""} running low: {lowStock.map(p => p.name).join(", ")}</p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {products.map(product => {
-            const isLow = product.stockQuantity <= product.lowStockThreshold;
-            const isOut = product.stockQuantity === 0;
-            return (
-              <Card key={product.id} className="p-4">
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div>
-                    <p className="font-semibold text-stone-900">{product.name}</p>
-                    <p className="text-xs text-stone-500 mt-0.5 capitalize">{product.category ?? "Product"}</p>
-                  </div>
-                  <Badge variant={isOut ? "danger" : isLow ? "warning" : "sage"}>
-                    {isOut ? "Out of stock" : isLow ? "Low stock" : "In stock"}
-                  </Badge>
-                </div>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <p className="text-2xl font-bold text-stone-900">{product.stockQuantity}</p>
-                    <p className="text-xs text-stone-400">units remaining</p>
-                  </div>
-                  <p className="text-sm font-semibold text-sage-600">{formatCurrency(Number(product.price))}</p>
-                </div>
-                <div className="mt-3 pt-3 border-t border-stone-50">
-                  <InventoryActions productId={product.id} productName={product.name} price={Number(product.price)} />
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+        <InventoryManager initialProducts={products.map(p => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          price: Number(p.price),
+          stockQuantity: p.stockQuantity,
+          lowStockThreshold: p.lowStockThreshold,
+          category: p.category,
+          isActive: p.isActive,
+        }))} />
 
         <Card>
           <CardHeader><CardTitle>Recent Transactions</CardTitle></CardHeader>
