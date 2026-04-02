@@ -34,9 +34,23 @@ export async function POST(request: NextRequest) {
 
   let clientId = user.id;
   if (isStaff && bodyClientId) {
-    clientId = bodyClientId; // Staff booking on behalf of client
+    clientId = bodyClientId;
   } else if (!isStaff && bodyClientId && bodyClientId !== user.id) {
     return apiError("You can only book for yourself", 403);
+  }
+
+  // Clients must have an active, fully-paid package before they can book
+  if (!isStaff) {
+    const activePaid = await prisma.clientPackage.findFirst({
+      where: { clientId, status: "active", paymentStatus: "paid" },
+      select: { id: true },
+    });
+    if (!activePaid) {
+      return apiError(
+        "Your payment has not been confirmed yet. Please visit reception to complete payment before booking.",
+        403
+      );
+    }
   }
 
   const result = await createBooking({

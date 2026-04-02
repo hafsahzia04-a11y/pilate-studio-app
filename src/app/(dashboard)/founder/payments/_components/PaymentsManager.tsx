@@ -3,68 +3,37 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import {
-  DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X, Calendar,
-} from "lucide-react";
+import { DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { cn, formatCurrency, formatDate, paymentStatusLabel } from "@/lib/utils";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Payment {
-  id: string;
-  clientName: string;
-  clientEmail: string;
-  packageName: string;
-  amount: number;
-  netAmount: number;
-  status: string;
-  paymentMethod: string;
-  dueDate: string | null;
-  paidAt: string | null;
-  createdAt: string;
-  referenceNumber: string | null;
-  notes: string | null;
+  id: string; clientName: string; clientEmail: string; packageName: string;
+  amount: number; netAmount: number; status: string; paymentMethod: string;
+  dueDate: string | null; paidAt: string | null; createdAt: string;
+  referenceNumber: string | null; notes: string | null;
 }
 
 interface OverduePackage {
-  id: string;
-  clientId: string;
-  clientName: string;
-  clientEmail: string;
-  clientPhone: string | null;
-  packageName: string;
-  amountDue: number;
-  amountPaid: number;
-  outstanding: number;
-  dueDate: string | null;
+  id: string; clientId: string; clientName: string; clientEmail: string;
+  clientPhone: string | null; packageName: string;
+  amountDue: number; amountPaid: number; outstanding: number; dueDate: string | null;
 }
 
 interface ExpiringPackage {
-  id: string;
-  clientName: string;
-  clientEmail: string;
-  packageName: string;
-  expiryDate: string;
-  remainingCredits: number;
+  id: string; clientName: string; clientEmail: string;
+  packageName: string; expiryDate: string; remainingCredits: number;
 }
 
 interface ClientWithPackages {
-  id: string;
-  fullName: string;
-  email: string;
+  id: string; fullName: string; email: string;
   packages: {
-    id: string;
-    packageName: string;
-    packageType: string;
-    amountDue: number;
-    amountPaid: number;
-    outstanding: number;
-    paymentStatus: string;
-    expiryDate: string;
+    id: string; packageName: string; packageType: string;
+    amountDue: number; amountPaid: number; outstanding: number;
+    paymentStatus: string; expiryDate: string;
   }[];
 }
 
@@ -72,19 +41,19 @@ interface Props {
   payments: Payment[];
   overduePackages: OverduePackage[];
   expiringPackages: ExpiringPackage[];
-  dueSoonPackages: OverduePackage[];
+  dueTomorrowPackages: OverduePackage[];
   allClients: ClientWithPackages[];
   dropInPrice: number;
   totalCollected: number;
   totalOutstanding: number;
   overdueCount: number;
-  dueSoonCount: number;
+  dueTomorrowCount: number;
 }
 
-type Tab = "all" | "overdue" | "due_soon" | "expiring";
+type Tab = "all" | "overdue" | "due_tomorrow" | "expiring";
 
-const inputCls =
-  "w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100";
+const inputCls = "w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100";
+const DROP_IN_OPTION = "__drop_in__";
 
 function paymentBadge(status: string): "sage" | "danger" | "warning" | "default" | "blue" {
   const map: Record<string, "sage" | "danger" | "warning" | "default" | "blue"> = {
@@ -93,23 +62,17 @@ function paymentBadge(status: string): "sage" | "danger" | "warning" | "default"
   return map[status] ?? "default";
 }
 
-const DROP_IN_OPTION = "__drop_in__";
-
-// ── Component ─────────────────────────────────────────────────────────────────
-
 export function PaymentsManager({
-  payments, overduePackages, expiringPackages, dueSoonPackages,
-  allClients, dropInPrice,
-  totalCollected, totalOutstanding, overdueCount, dueSoonCount,
+  payments, overduePackages, expiringPackages, dueTomorrowPackages,
+  allClients, dropInPrice, totalCollected, totalOutstanding, overdueCount, dueTomorrowCount,
 }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Form state
   const [clientId, setClientId] = useState("");
-  const [packageOption, setPackageOption] = useState(""); // clientPackage.id or DROP_IN_OPTION
+  const [packageOption, setPackageOption] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [referenceNumber, setReferenceNumber] = useState("");
@@ -122,11 +85,6 @@ export function PaymentsManager({
     setPaymentMethod("cash"); setReferenceNumber(""); setNotes("");
   }
 
-  function openBlank() {
-    resetForm();
-    setModalOpen(true);
-  }
-
   function openForOverdue(cp: OverduePackage) {
     resetForm();
     setClientId(cp.clientId);
@@ -136,9 +94,7 @@ export function PaymentsManager({
   }
 
   function onClientChange(id: string) {
-    setClientId(id);
-    setPackageOption("");
-    setAmount("");
+    setClientId(id); setPackageOption(""); setAmount("");
   }
 
   function onPackageChange(option: string) {
@@ -157,47 +113,33 @@ export function PaymentsManager({
     e.preventDefault();
     if (!clientId) { toast.error("Select a client"); return; }
     if (!packageOption) { toast.error("Select a package"); return; }
-    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-      toast.error("Enter a valid amount"); return;
-    }
+    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) { toast.error("Enter a valid amount"); return; }
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
-        clientId,
-        amount: Number(amount),
-        paymentMethod,
+        clientId, amount: Number(amount), paymentMethod,
         referenceNumber: referenceNumber.trim() || null,
         notes: notes.trim() || null,
       };
-
-      if (packageOption === DROP_IN_OPTION) {
-        body.isDropIn = true;
-      } else {
-        body.clientPackageId = packageOption;
-      }
+      if (packageOption === DROP_IN_OPTION) { body.isDropIn = true; }
+      else { body.clientPackageId = packageOption; }
 
       const res = await fetch("/api/payments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to record payment");
+      if (!res.ok) throw new Error(data.error ?? "Failed");
       toast.success("Payment recorded");
-      setModalOpen(false);
-      resetForm();
-      router.refresh();
+      setModalOpen(false); resetForm(); router.refresh();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   const tabs: { label: string; value: Tab; count?: number }[] = [
     { label: "All Payments", value: "all", count: payments.length },
     { label: "Overdue", value: "overdue", count: overduePackages.length },
-    { label: "Due This Month", value: "due_soon", count: dueSoonPackages.length },
+    { label: "Due Tomorrow", value: "due_tomorrow", count: dueTomorrowPackages.length },
     { label: "Expiring Soon", value: "expiring", count: expiringPackages.length },
   ];
 
@@ -209,66 +151,39 @@ export function PaymentsManager({
           <h1 className="text-xl font-bold text-stone-900">Payments</h1>
           <p className="text-sm text-stone-500">Track collections and overdue accounts</p>
         </div>
-        <Button onClick={openBlank}>
-          <Plus className="h-4 w-4" />
-          Record Payment
+        <Button onClick={() => { resetForm(); setModalOpen(true); }}>
+          <Plus className="h-4 w-4" /> Record Payment
         </Button>
       </div>
 
-      {/* Alert banner when overdue or due soon */}
-      {(overdueCount > 0 || dueSoonCount > 0) && (
+      {/* Alert banner */}
+      {(overdueCount > 0 || dueTomorrowCount > 0) && (
         <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
           <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-red-700 space-y-0.5">
-            {overdueCount > 0 && (
-              <p><span className="font-semibold">{overdueCount} client{overdueCount > 1 ? "s" : ""}</span> with overdue payments.</p>
-            )}
-            {dueSoonCount > 0 && (
-              <p><span className="font-semibold">{dueSoonCount} client{dueSoonCount > 1 ? "s" : ""}</span> with payment due in the next 30 days.</p>
-            )}
+            {overdueCount > 0 && <p><span className="font-semibold">{overdueCount} client{overdueCount !== 1 ? "s" : ""}</span> with overdue payments — collect immediately.</p>}
+            {dueTomorrowCount > 0 && <p><span className="font-semibold">{dueTomorrowCount} client{dueTomorrowCount !== 1 ? "s" : ""}</span> with payment due tomorrow.</p>}
           </div>
         </div>
       )}
 
-      {/* Summary cards */}
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          title="Collected This Month"
-          value={formatCurrency(totalCollected)}
-          icon={<DollarSign className="h-5 w-5" />}
-          color="sage"
-        />
-        <StatCard
-          title="Outstanding Balance"
-          value={formatCurrency(totalOutstanding)}
-          icon={<AlertTriangle className="h-5 w-5" />}
-          color={totalOutstanding > 0 ? "red" : "stone"}
-        />
-        <StatCard
-          title="Overdue Accounts"
-          value={overdueCount}
-          icon={<Clock className="h-5 w-5" />}
-          color={overdueCount > 0 ? "amber" : "stone"}
-        />
+        <StatCard title="Collected This Month" value={formatCurrency(totalCollected)} icon={<DollarSign className="h-5 w-5" />} color="sage" />
+        <StatCard title="Outstanding Balance" value={formatCurrency(totalOutstanding)} icon={<AlertTriangle className="h-5 w-5" />} color={totalOutstanding > 0 ? "red" : "stone"} />
+        <StatCard title="Overdue Accounts" value={overdueCount} icon={<Clock className="h-5 w-5" />} color={overdueCount > 0 ? "amber" : "stone"} />
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-stone-100 p-1 rounded-xl w-fit overflow-x-auto">
         {tabs.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setTab(t.value)}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
-              tab === t.value ? "bg-white shadow-card text-stone-900" : "text-stone-500 hover:text-stone-700"
-            )}
-          >
+          <button key={t.value} onClick={() => setTab(t.value)}
+            className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
+              tab === t.value ? "bg-white shadow-card text-stone-900" : "text-stone-500 hover:text-stone-700")}>
             {t.label}
             {t.count !== undefined && t.count > 0 && (
-              <span className={cn(
-                "ml-1.5 text-xs px-1.5 py-0.5 rounded-full",
-                tab === t.value ? "bg-sage-100 text-sage-700" : "bg-stone-200 text-stone-600"
-              )}>
+              <span className={cn("ml-1.5 text-xs px-1.5 py-0.5 rounded-full",
+                tab === t.value ? "bg-sage-100 text-sage-700" : "bg-stone-200 text-stone-600")}>
                 {t.count}
               </span>
             )}
@@ -296,13 +211,8 @@ export function PaymentsManager({
                 </thead>
                 <tbody className="divide-y divide-stone-100">
                   {payments.map((p) => (
-                    <tr
-                      key={p.id}
-                      className={cn(
-                        "transition-colors",
-                        p.status === "overdue" ? "bg-red-50 hover:bg-red-100" : "hover:bg-cream-50"
-                      )}
-                    >
+                    <tr key={p.id} className={cn("transition-colors",
+                      p.status === "overdue" ? "bg-red-50 hover:bg-red-100" : "hover:bg-cream-50")}>
                       <td className="px-4 py-3">
                         <p className="font-medium text-stone-800">{p.clientName}</p>
                         <p className="text-xs text-stone-400">{p.clientEmail}</p>
@@ -310,15 +220,11 @@ export function PaymentsManager({
                       <td className="px-4 py-3 text-stone-600 text-xs">{p.packageName}</td>
                       <td className="px-4 py-3 font-semibold text-stone-900">{formatCurrency(p.amount)}</td>
                       <td className="px-4 py-3 text-stone-500 capitalize text-xs">{p.paymentMethod.replace("_", " ")}</td>
-                      <td className="px-4 py-3">
-                        <Badge variant={paymentBadge(p.status)}>{paymentStatusLabel(p.status)}</Badge>
-                      </td>
+                      <td className="px-4 py-3"><Badge variant={paymentBadge(p.status)}>{paymentStatusLabel(p.status)}</Badge></td>
                       <td className={cn("px-4 py-3 text-xs", p.status === "overdue" ? "text-red-600 font-medium" : "text-stone-500")}>
                         {p.dueDate ? formatDate(p.dueDate) : "—"}
                       </td>
-                      <td className="px-4 py-3 text-stone-500 text-xs">
-                        {p.paidAt ? formatDate(p.paidAt) : "—"}
-                      </td>
+                      <td className="px-4 py-3 text-stone-500 text-xs">{p.paidAt ? formatDate(p.paidAt) : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -328,16 +234,16 @@ export function PaymentsManager({
         </Card>
       )}
 
-      {/* Overdue tab */}
+      {/* Overdue */}
       {tab === "overdue" && (
         <div className="space-y-3">
           {overduePackages.length === 0 ? (
             <Card className="p-12 text-center">
               <CheckCircle className="h-8 w-8 text-sage-400 mx-auto mb-2" />
-              <p className="text-stone-500 text-sm">No overdue payments. Great news!</p>
+              <p className="text-stone-500 text-sm">No overdue payments.</p>
             </Card>
           ) : overduePackages.map((cp) => (
-            <Card key={cp.id} className="p-4 border-red-100 bg-red-50">
+            <Card key={cp.id} className="p-4 border-red-200 bg-red-50">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -358,21 +264,21 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* Due This Month tab */}
-      {tab === "due_soon" && (
+      {/* Due Tomorrow */}
+      {tab === "due_tomorrow" && (
         <div className="space-y-3">
-          {dueSoonPackages.length === 0 ? (
+          {dueTomorrowPackages.length === 0 ? (
             <Card className="p-12 text-center">
               <Calendar className="h-8 w-8 text-stone-300 mx-auto mb-2" />
-              <p className="text-stone-400 text-sm">No payments due in the next 30 days.</p>
+              <p className="text-stone-400 text-sm">No payments due tomorrow.</p>
             </Card>
-          ) : dueSoonPackages.map((cp) => (
-            <Card key={cp.id} className="p-4 border-amber-100 bg-amber-50">
+          ) : dueTomorrowPackages.map((cp) => (
+            <Card key={cp.id} className="p-4 border-amber-200 bg-amber-50">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold text-stone-900">{cp.clientName}</p>
-                    <Badge variant="warning">Due Soon</Badge>
+                    <Badge variant="warning">Due Tomorrow</Badge>
                   </div>
                   <p className="text-sm text-stone-500 mt-0.5">{cp.packageName}</p>
                   {cp.dueDate && <p className="text-xs text-amber-700 mt-0.5 font-medium">Due: {formatDate(cp.dueDate)}</p>}
@@ -388,7 +294,7 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* Expiring Soon tab */}
+      {/* Expiring */}
       {tab === "expiring" && (
         <div className="space-y-3">
           {expiringPackages.length === 0 ? (
@@ -413,7 +319,7 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* ── Record Payment Modal ──────────────────────────────────────────────── */}
+      {/* Record Payment Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -428,86 +334,49 @@ export function PaymentsManager({
             </div>
 
             <form onSubmit={submitPayment} className="px-6 py-5 space-y-4">
-
-              {/* Client dropdown */}
               <div>
                 <label className="block text-xs font-medium text-stone-600 mb-1">Client *</label>
-                <select
-                  className={inputCls}
-                  value={clientId}
-                  onChange={(e) => onClientChange(e.target.value)}
-                  required
-                >
+                <select className={inputCls} value={clientId} onChange={(e) => onClientChange(e.target.value)} required>
                   <option value="">— select client —</option>
-                  {allClients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.fullName}</option>
-                  ))}
+                  {allClients.map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
                 </select>
               </div>
 
-              {/* Package dropdown — shown once client is selected */}
               {clientId && (
                 <div>
                   <label className="block text-xs font-medium text-stone-600 mb-1">Package *</label>
-                  <select
-                    className={inputCls}
-                    value={packageOption}
-                    onChange={(e) => onPackageChange(e.target.value)}
-                    required
-                  >
+                  <select className={inputCls} value={packageOption} onChange={(e) => onPackageChange(e.target.value)} required>
                     <option value="">— select package —</option>
-
-                    {/* Existing active packages */}
                     {selectedClient && selectedClient.packages.length > 0 && (
                       <optgroup label="Active Packages">
                         {selectedClient.packages.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.packageName}
-                            {p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — paid"}
+                            {p.packageName}{p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — paid"}
                           </option>
                         ))}
                       </optgroup>
                     )}
-
-                    {/* Drop-in is always available to any client */}
                     <optgroup label="New Purchase">
-                      <option value={DROP_IN_OPTION}>
-                        Drop-in Class (valid today only) — {formatCurrency(dropInPrice)}
-                      </option>
+                      <option value={DROP_IN_OPTION}>Drop-in (today only) — {formatCurrency(dropInPrice)}</option>
                     </optgroup>
                   </select>
-
                   {packageOption === DROP_IN_OPTION && (
                     <p className="text-xs text-amber-700 mt-1 bg-amber-50 rounded-lg px-3 py-1.5">
-                      A new drop-in booking will be created for {selectedClient?.fullName}, valid for today only.
+                      New drop-in valid today only will be created for {selectedClient?.fullName}.
                     </p>
                   )}
                 </div>
               )}
 
-              {/* Amount */}
               <div>
                 <label className="block text-xs font-medium text-stone-600 mb-1">Amount (PKR) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className={inputCls}
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                  required
-                />
+                <input type="number" step="0.01" min="0" className={inputCls} value={amount}
+                  onChange={(e) => setAmount(e.target.value)} placeholder="0" required />
               </div>
 
-              {/* Payment method */}
               <div>
                 <label className="block text-xs font-medium text-stone-600 mb-1">Payment Method</label>
-                <select
-                  className={inputCls}
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                >
+                <select className={inputCls} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
                   <option value="bank_transfer">Bank Transfer</option>
@@ -516,37 +385,22 @@ export function PaymentsManager({
                 </select>
               </div>
 
-              {/* Reference */}
               <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">Reference Number <span className="text-stone-400">(optional)</span></label>
-                <input
-                  type="text"
-                  placeholder="e.g. TXN123456"
-                  className={inputCls}
-                  value={referenceNumber}
-                  onChange={(e) => setReferenceNumber(e.target.value)}
-                />
+                <label className="block text-xs font-medium text-stone-600 mb-1">Reference <span className="text-stone-400">(optional)</span></label>
+                <input type="text" placeholder="e.g. TXN123456" className={inputCls}
+                  value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
               </div>
 
-              {/* Notes */}
               <div>
                 <label className="block text-xs font-medium text-stone-600 mb-1">Notes <span className="text-stone-400">(optional)</span></label>
-                <textarea
-                  rows={2}
-                  placeholder="Any additional notes…"
+                <textarea rows={2} placeholder="Any additional notes…"
                   className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100 resize-none"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
+                  value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
 
               <div className="flex gap-3 pt-2 border-t border-stone-100">
-                <Button type="button" variant="outline" className="flex-1" onClick={() => { setModalOpen(false); resetForm(); }}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="flex-1" loading={saving}>
-                  {saving ? "Recording…" : "Record Payment"}
-                </Button>
+                <Button type="button" variant="outline" className="flex-1" onClick={() => { setModalOpen(false); resetForm(); }}>Cancel</Button>
+                <Button type="submit" className="flex-1" loading={saving}>{saving ? "Recording…" : "Record Payment"}</Button>
               </div>
             </form>
           </div>
