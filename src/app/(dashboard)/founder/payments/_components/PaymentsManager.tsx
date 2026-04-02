@@ -2,22 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
 import {
-  DollarSign,
-  AlertTriangle,
-  Clock,
-  Download,
-  Plus,
-  CheckCircle,
+  DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X, Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
-import { Modal } from "@/components/ui/modal";
 import { cn, formatCurrency, formatDate, paymentStatusLabel } from "@/lib/utils";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Payment {
   id: string;
@@ -57,88 +52,152 @@ interface ExpiringPackage {
   remainingCredits: number;
 }
 
-interface RecordPaymentForm {
-  clientPackageId: string;
-  amount: number;
-  paymentMethod: string;
-  referenceNumber: string;
-  notes: string;
+interface ClientWithPackages {
+  id: string;
+  fullName: string;
+  email: string;
+  packages: {
+    id: string;
+    packageName: string;
+    packageType: string;
+    amountDue: number;
+    amountPaid: number;
+    outstanding: number;
+    paymentStatus: string;
+    expiryDate: string;
+  }[];
 }
 
 interface Props {
   payments: Payment[];
   overduePackages: OverduePackage[];
   expiringPackages: ExpiringPackage[];
+  dueSoonPackages: OverduePackage[];
+  allClients: ClientWithPackages[];
+  dropInPrice: number;
   totalCollected: number;
   totalOutstanding: number;
   overdueCount: number;
+  dueSoonCount: number;
 }
 
-type Tab = "all" | "overdue" | "expiring";
+type Tab = "all" | "overdue" | "due_soon" | "expiring";
+
+const inputCls =
+  "w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100";
 
 function paymentBadge(status: string): "sage" | "danger" | "warning" | "default" | "blue" {
   const map: Record<string, "sage" | "danger" | "warning" | "default" | "blue"> = {
-    paid: "sage",
-    overdue: "danger",
-    partial: "warning",
-    unpaid: "default",
-    refunded: "blue",
+    paid: "sage", overdue: "danger", partial: "warning", unpaid: "default", refunded: "blue",
   };
   return map[status] ?? "default";
 }
 
+const DROP_IN_OPTION = "__drop_in__";
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function PaymentsManager({
-  payments,
-  overduePackages,
-  expiringPackages,
-  totalCollected,
-  totalOutstanding,
-  overdueCount,
+  payments, overduePackages, expiringPackages, dueSoonPackages,
+  allClients, dropInPrice,
+  totalCollected, totalOutstanding, overdueCount, dueSoonCount,
 }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("all");
-  const [recordOpen, setRecordOpen] = useState(false);
-  const [selectedOverdue, setSelectedOverdue] = useState<OverduePackage | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setValue,
-    formState: { errors, isSubmitting },
-  } = useForm<RecordPaymentForm>({
-    defaultValues: { paymentMethod: "cash", amount: 0 },
-  });
+  // Form state
+  const [clientId, setClientId] = useState("");
+  const [packageOption, setPackageOption] = useState(""); // clientPackage.id or DROP_IN_OPTION
+  const [amount, setAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [referenceNumber, setReferenceNumber] = useState("");
+  const [notes, setNotes] = useState("");
 
-  async function onRecordPayment(values: RecordPaymentForm) {
-    try {
-      const res = await fetch("/api/payments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to record payment");
-      toast.success("Payment recorded successfully");
-      setRecordOpen(false);
-      setSelectedOverdue(null);
-      reset();
-      router.refresh();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+  const selectedClient = allClients.find((c) => c.id === clientId) ?? null;
+
+  function resetForm() {
+    setClientId(""); setPackageOption(""); setAmount("");
+    setPaymentMethod("cash"); setReferenceNumber(""); setNotes("");
+  }
+
+  function openBlank() {
+    resetForm();
+    setModalOpen(true);
+  }
+
+  function openForOverdue(cp: OverduePackage) {
+    resetForm();
+    setClientId(cp.clientId);
+    setPackageOption(cp.id);
+    setAmount(String(cp.outstanding));
+    setModalOpen(true);
+  }
+
+  function onClientChange(id: string) {
+    setClientId(id);
+    setPackageOption("");
+    setAmount("");
+  }
+
+  function onPackageChange(option: string) {
+    setPackageOption(option);
+    if (option === DROP_IN_OPTION) {
+      setAmount(String(dropInPrice));
+    } else if (option) {
+      const pkg = selectedClient?.packages.find((p) => p.id === option);
+      if (pkg) setAmount(String(pkg.outstanding > 0 ? pkg.outstanding : pkg.amountDue));
+    } else {
+      setAmount("");
     }
   }
 
-  function openRecordForOverdue(cp: OverduePackage) {
-    setSelectedOverdue(cp);
-    setValue("clientPackageId", cp.id);
-    setValue("amount", cp.outstanding);
-    setRecordOpen(true);
+  async function submitPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!clientId) { toast.error("Select a client"); return; }
+    if (!packageOption) { toast.error("Select a package"); return; }
+    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+      toast.error("Enter a valid amount"); return;
+    }
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        clientId,
+        amount: Number(amount),
+        paymentMethod,
+        referenceNumber: referenceNumber.trim() || null,
+        notes: notes.trim() || null,
+      };
+
+      if (packageOption === DROP_IN_OPTION) {
+        body.isDropIn = true;
+      } else {
+        body.clientPackageId = packageOption;
+      }
+
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to record payment");
+      toast.success("Payment recorded");
+      setModalOpen(false);
+      resetForm();
+      router.refresh();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const tabs: { label: string; value: Tab; count?: number }[] = [
     { label: "All Payments", value: "all", count: payments.length },
     { label: "Overdue", value: "overdue", count: overduePackages.length },
+    { label: "Due This Month", value: "due_soon", count: dueSoonPackages.length },
     { label: "Expiring Soon", value: "expiring", count: expiringPackages.length },
   ];
 
@@ -150,17 +209,26 @@ export function PaymentsManager({
           <h1 className="text-xl font-bold text-stone-900">Payments</h1>
           <p className="text-sm text-stone-500">Track collections and overdue accounts</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
-          <Button onClick={() => { setSelectedOverdue(null); reset(); setRecordOpen(true); }}>
-            <Plus className="h-4 w-4" />
-            Record Payment
-          </Button>
-        </div>
+        <Button onClick={openBlank}>
+          <Plus className="h-4 w-4" />
+          Record Payment
+        </Button>
       </div>
+
+      {/* Alert banner when overdue or due soon */}
+      {(overdueCount > 0 || dueSoonCount > 0) && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
+          <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-red-700 space-y-0.5">
+            {overdueCount > 0 && (
+              <p><span className="font-semibold">{overdueCount} client{overdueCount > 1 ? "s" : ""}</span> with overdue payments.</p>
+            )}
+            {dueSoonCount > 0 && (
+              <p><span className="font-semibold">{dueSoonCount} client{dueSoonCount > 1 ? "s" : ""}</span> with payment due in the next 30 days.</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -185,28 +253,22 @@ export function PaymentsManager({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-stone-100 p-1 rounded-xl w-fit">
+      <div className="flex gap-1 bg-stone-100 p-1 rounded-xl w-fit overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.value}
             onClick={() => setTab(t.value)}
             className={cn(
               "px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
-              tab === t.value
-                ? "bg-white shadow-card text-stone-900"
-                : "text-stone-500 hover:text-stone-700"
+              tab === t.value ? "bg-white shadow-card text-stone-900" : "text-stone-500 hover:text-stone-700"
             )}
           >
             {t.label}
             {t.count !== undefined && t.count > 0 && (
-              <span
-                className={cn(
-                  "ml-1.5 text-xs px-1.5 py-0.5 rounded-full",
-                  tab === t.value
-                    ? "bg-sage-100 text-sage-700"
-                    : "bg-stone-200 text-stone-600"
-                )}
-              >
+              <span className={cn(
+                "ml-1.5 text-xs px-1.5 py-0.5 rounded-full",
+                tab === t.value ? "bg-sage-100 text-sage-700" : "bg-stone-200 text-stone-600"
+              )}>
                 {t.count}
               </span>
             )}
@@ -214,7 +276,7 @@ export function PaymentsManager({
         ))}
       </div>
 
-      {/* All payments tab */}
+      {/* All payments */}
       {tab === "all" && (
         <Card className="overflow-hidden">
           {payments.length === 0 ? (
@@ -227,38 +289,31 @@ export function PaymentsManager({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-stone-100 bg-cream-50">
-                    {["Client", "Package", "Amount", "Method", "Status", "Due Date", "Paid At"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide whitespace-nowrap"
-                        >
-                          {h}
-                        </th>
-                      )
-                    )}
+                    {["Client", "Package", "Amount (PKR)", "Method", "Status", "Due Date", "Paid At"].map((h) => (
+                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
                   {payments.map((p) => (
-                    <tr key={p.id} className="hover:bg-cream-50 transition-colors">
+                    <tr
+                      key={p.id}
+                      className={cn(
+                        "transition-colors",
+                        p.status === "overdue" ? "bg-red-50 hover:bg-red-100" : "hover:bg-cream-50"
+                      )}
+                    >
                       <td className="px-4 py-3">
                         <p className="font-medium text-stone-800">{p.clientName}</p>
                         <p className="text-xs text-stone-400">{p.clientEmail}</p>
                       </td>
                       <td className="px-4 py-3 text-stone-600 text-xs">{p.packageName}</td>
-                      <td className="px-4 py-3 font-semibold text-stone-900">
-                        {formatCurrency(p.amount)}
-                      </td>
-                      <td className="px-4 py-3 text-stone-500 capitalize text-xs">
-                        {p.paymentMethod.replace("_", " ")}
-                      </td>
+                      <td className="px-4 py-3 font-semibold text-stone-900">{formatCurrency(p.amount)}</td>
+                      <td className="px-4 py-3 text-stone-500 capitalize text-xs">{p.paymentMethod.replace("_", " ")}</td>
                       <td className="px-4 py-3">
-                        <Badge variant={paymentBadge(p.status)}>
-                          {paymentStatusLabel(p.status)}
-                        </Badge>
+                        <Badge variant={paymentBadge(p.status)}>{paymentStatusLabel(p.status)}</Badge>
                       </td>
-                      <td className="px-4 py-3 text-stone-500 text-xs">
+                      <td className={cn("px-4 py-3 text-xs", p.status === "overdue" ? "text-red-600 font-medium" : "text-stone-500")}>
                         {p.dueDate ? formatDate(p.dueDate) : "—"}
                       </td>
                       <td className="px-4 py-3 text-stone-500 text-xs">
@@ -281,165 +336,222 @@ export function PaymentsManager({
               <CheckCircle className="h-8 w-8 text-sage-400 mx-auto mb-2" />
               <p className="text-stone-500 text-sm">No overdue payments. Great news!</p>
             </Card>
-          ) : (
-            overduePackages.map((cp) => (
-              <Card key={cp.id} className="p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-stone-900">{cp.clientName}</p>
-                      <Badge variant="danger">Overdue</Badge>
-                    </div>
-                    <p className="text-sm text-stone-500 mt-0.5">{cp.packageName}</p>
-                    {cp.dueDate && (
-                      <p className="text-xs text-red-500 mt-0.5">
-                        Due: {formatDate(cp.dueDate)}
-                      </p>
-                    )}
+          ) : overduePackages.map((cp) => (
+            <Card key={cp.id} className="p-4 border-red-100 bg-red-50">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-stone-900">{cp.clientName}</p>
+                    <Badge variant="danger">Overdue</Badge>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-lg font-bold text-red-600">
-                      {formatCurrency(cp.outstanding)}
-                    </p>
-                    <p className="text-xs text-stone-400">outstanding</p>
-                  </div>
-                  <Button size="sm" onClick={() => openRecordForOverdue(cp)}>
-                    Record
-                  </Button>
+                  <p className="text-sm text-stone-500 mt-0.5">{cp.packageName}</p>
+                  {cp.dueDate && <p className="text-xs text-red-600 mt-0.5 font-medium">Was due: {formatDate(cp.dueDate)}</p>}
                 </div>
-              </Card>
-            ))
-          )}
+                <div className="text-right flex-shrink-0">
+                  <p className="text-lg font-bold text-red-600">{formatCurrency(cp.outstanding)}</p>
+                  <p className="text-xs text-stone-400">outstanding</p>
+                </div>
+                <Button size="sm" onClick={() => openForOverdue(cp)}>Record</Button>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* Expiring tab */}
+      {/* Due This Month tab */}
+      {tab === "due_soon" && (
+        <div className="space-y-3">
+          {dueSoonPackages.length === 0 ? (
+            <Card className="p-12 text-center">
+              <Calendar className="h-8 w-8 text-stone-300 mx-auto mb-2" />
+              <p className="text-stone-400 text-sm">No payments due in the next 30 days.</p>
+            </Card>
+          ) : dueSoonPackages.map((cp) => (
+            <Card key={cp.id} className="p-4 border-amber-100 bg-amber-50">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-stone-900">{cp.clientName}</p>
+                    <Badge variant="warning">Due Soon</Badge>
+                  </div>
+                  <p className="text-sm text-stone-500 mt-0.5">{cp.packageName}</p>
+                  {cp.dueDate && <p className="text-xs text-amber-700 mt-0.5 font-medium">Due: {formatDate(cp.dueDate)}</p>}
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-lg font-bold text-amber-700">{formatCurrency(cp.outstanding)}</p>
+                  <p className="text-xs text-stone-400">outstanding</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => openForOverdue(cp)}>Record</Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Expiring Soon tab */}
       {tab === "expiring" && (
         <div className="space-y-3">
           {expiringPackages.length === 0 ? (
             <Card className="p-12 text-center">
               <p className="text-stone-400 text-sm">No packages expiring in the next 7 days.</p>
             </Card>
-          ) : (
-            expiringPackages.map((cp) => (
-              <Card key={cp.id} className="p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-semibold text-stone-900">{cp.clientName}</p>
-                    <p className="text-sm text-stone-500">{cp.packageName}</p>
-                    <p className="text-xs text-amber-600 mt-0.5">
-                      Expires: {formatDate(cp.expiryDate)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-stone-700">{cp.remainingCredits}</p>
-                    <p className="text-xs text-stone-400">credits left</p>
-                  </div>
+          ) : expiringPackages.map((cp) => (
+            <Card key={cp.id} className="p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-stone-900">{cp.clientName}</p>
+                  <p className="text-sm text-stone-500">{cp.packageName}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">Expires: {formatDate(cp.expiryDate)}</p>
                 </div>
-              </Card>
-            ))
-          )}
+                <div className="text-right">
+                  <p className="text-lg font-bold text-stone-700">{cp.remainingCredits}</p>
+                  <p className="text-xs text-stone-400">credits left</p>
+                </div>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* Record Payment Modal */}
-      <Modal
-        open={recordOpen}
-        onOpenChange={(open) => {
-          setRecordOpen(open);
-          if (!open) { reset(); setSelectedOverdue(null); }
-        }}
-        title="Record Payment"
-        description={
-          selectedOverdue
-            ? `Recording payment for ${selectedOverdue.clientName}`
-            : "Record a new payment"
-        }
-      >
-        <form onSubmit={handleSubmit(onRecordPayment)} className="space-y-4">
-          {!selectedOverdue && (
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-stone-700">
-                Client Package ID
-              </label>
-              <input
-                type="text"
-                placeholder="Package ID"
-                {...register("clientPackageId", { required: "Required" })}
-                className="w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100"
-              />
-              {errors.clientPackageId && (
-                <p className="text-xs text-red-500">{errors.clientPackageId.message}</p>
-              )}
+      {/* ── Record Payment Modal ──────────────────────────────────────────────── */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
+              <div>
+                <h2 className="text-base font-semibold text-stone-900">Record Payment</h2>
+                <p className="text-xs text-stone-400 mt-0.5">Select client and package</p>
+              </div>
+              <button onClick={() => { setModalOpen(false); resetForm(); }} className="text-stone-400 hover:text-stone-600">
+                <X className="h-5 w-5" />
+              </button>
             </div>
-          )}
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-stone-700">Amount (AED)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              {...register("amount", { required: "Amount is required", valueAsNumber: true, min: 0 })}
-              className="w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100"
-            />
-            {errors.amount && (
-              <p className="text-xs text-red-500">{errors.amount.message}</p>
-            )}
-          </div>
+            <form onSubmit={submitPayment} className="px-6 py-5 space-y-4">
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-stone-700">Payment Method</label>
-            <select
-              {...register("paymentMethod", { required: true })}
-              className="w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400"
-            >
-              <option value="cash">Cash</option>
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank Transfer</option>
-              <option value="online">Online</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
+              {/* Client dropdown */}
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Client *</label>
+                <select
+                  className={inputCls}
+                  value={clientId}
+                  onChange={(e) => onClientChange(e.target.value)}
+                  required
+                >
+                  <option value="">— select client —</option>
+                  {allClients.map((c) => (
+                    <option key={c.id} value={c.id}>{c.fullName}</option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-stone-700">
-              Reference Number (optional)
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. TXN123456"
-              {...register("referenceNumber")}
-              className="w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100"
-            />
-          </div>
+              {/* Package dropdown — shown once client is selected */}
+              {clientId && (
+                <div>
+                  <label className="block text-xs font-medium text-stone-600 mb-1">Package *</label>
+                  <select
+                    className={inputCls}
+                    value={packageOption}
+                    onChange={(e) => onPackageChange(e.target.value)}
+                    required
+                  >
+                    <option value="">— select package —</option>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-stone-700">Notes (optional)</label>
-            <textarea
-              rows={2}
-              placeholder="Any additional notes…"
-              {...register("notes")}
-              className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100 resize-none"
-            />
-          </div>
+                    {/* Existing active packages */}
+                    {selectedClient && selectedClient.packages.length > 0 && (
+                      <optgroup label="Active Packages">
+                        {selectedClient.packages.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.packageName}
+                            {p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — paid"}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
 
-          <div className="flex gap-3 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1"
-              onClick={() => { setRecordOpen(false); reset(); setSelectedOverdue(null); }}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" className="flex-1" loading={isSubmitting}>
-              <CheckCircle className="h-4 w-4" />
-              Record Payment
-            </Button>
+                    {/* Drop-in is always available to any client */}
+                    <optgroup label="New Purchase">
+                      <option value={DROP_IN_OPTION}>
+                        Drop-in Class (valid today only) — {formatCurrency(dropInPrice)}
+                      </option>
+                    </optgroup>
+                  </select>
+
+                  {packageOption === DROP_IN_OPTION && (
+                    <p className="text-xs text-amber-700 mt-1 bg-amber-50 rounded-lg px-3 py-1.5">
+                      A new drop-in booking will be created for {selectedClient?.fullName}, valid for today only.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Amount */}
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Amount (PKR) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className={inputCls}
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0"
+                  required
+                />
+              </div>
+
+              {/* Payment method */}
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Payment Method</label>
+                <select
+                  className={inputCls}
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="online">Online</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              {/* Reference */}
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Reference Number <span className="text-stone-400">(optional)</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. TXN123456"
+                  className={inputCls}
+                  value={referenceNumber}
+                  onChange={(e) => setReferenceNumber(e.target.value)}
+                />
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Notes <span className="text-stone-400">(optional)</span></label>
+                <textarea
+                  rows={2}
+                  placeholder="Any additional notes…"
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100 resize-none"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2 border-t border-stone-100">
+                <Button type="button" variant="outline" className="flex-1" onClick={() => { setModalOpen(false); resetForm(); }}>
+                  Cancel
+                </Button>
+                <Button type="submit" className="flex-1" loading={saving}>
+                  {saving ? "Recording…" : "Record Payment"}
+                </Button>
+              </div>
+            </form>
           </div>
-        </form>
-      </Modal>
+        </div>
+      )}
     </div>
   );
 }

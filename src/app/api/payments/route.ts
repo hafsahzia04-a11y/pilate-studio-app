@@ -66,15 +66,48 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   const {
-    clientId, clientPackageId, amount, paymentMethod,
+    clientId, amount, paymentMethod,
     discountApplied = 0, notes, referenceNumber,
+    isDropIn = false,
   } = body;
+  let { clientPackageId } = body;
 
   if (!clientId || !amount) return apiError("clientId and amount are required");
 
   const amountNum = Number(amount);
   const discountNum = Number(discountApplied);
   const netAmount = amountNum - discountNum;
+
+  // For a new drop-in purchase, create the ClientPackage first
+  if (isDropIn) {
+    const dropInPkg = await prisma.package.findFirst({
+      where: { type: "drop_in", isActive: true },
+    });
+    if (!dropInPkg) return apiError("No active drop-in package defined. Please create one in Packages.");
+
+    const today = new Date();
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const newCp = await prisma.clientPackage.create({
+      data: {
+        clientId,
+        packageId: dropInPkg.id,
+        startDate: todayDate,
+        expiryDate: todayDate, // valid today only
+        totalCredits: dropInPkg.classCredits,
+        remainingCredits: dropInPkg.classCredits,
+        usedCredits: 0,
+        amountDue: Number(dropInPkg.price),
+        amountPaid: amountNum,
+        paymentStatus: amountNum >= Number(dropInPkg.price) ? "paid" : "partial",
+        status: "active",
+        drinksRemaining: 0,
+        guestPassesRemaining: 0,
+        createdById: user.id,
+      },
+    });
+    clientPackageId = newCp.id;
+  }
 
   const payment = await prisma.$transaction(async (tx) => {
     const p = await tx.payment.create({
@@ -93,22 +126,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Update client package payment status if linked
-    if (clientPackageId) {
-      const cp = await tx.clientPackage.findUnique({
-        where: { id: clientPackageId },
-      });
-
+    // Update client package payment status if linked (and not drop-in, which was already updated)
+    if (clientPackageId && !isDropIn) {
+      const cp = await tx.clientPackage.findUnique({ where: { id: clientPackageId } });
       if (cp) {
         const newAmountPaid = Number(cp.amountPaid) + amountNum;
         const outstanding = Number(cp.amountDue) - newAmountPaid;
-
         await tx.clientPackage.update({
           where: { id: clientPackageId },
           data: {
             amountPaid: newAmountPaid,
             paymentStatus: outstanding <= 0 ? "paid" : "partial",
-            status: "active", // Activate if it was pending_payment
+            status: "active",
           },
         });
       }
