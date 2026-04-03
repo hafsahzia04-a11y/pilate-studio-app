@@ -145,6 +145,112 @@ export interface PackageSalesData {
   revenue: number;
 }
 
+// ─── Full Client Profile (from GET /api/clients/[id]) ────────────────────────
+
+export interface ClientPackageDetail {
+  id: string;
+  packageId: string;
+  package: {
+    id: string;
+    name: string;
+    type: string;
+    price: number;
+    classCredits: number;
+    validityDays: number;
+    guestPassesPerPeriod: number;
+    workshopDiscountPercent: number;
+    drinksPerPeriod: number;
+    priorityBooking: boolean;
+    isFounding: boolean;
+    description?: string | null;
+  };
+  startDate: Date;
+  expiryDate: Date;
+  renewalDate?: Date | null;
+  totalCredits: number;
+  usedCredits: number;
+  remainingCredits: number;
+  guestPassesRemaining: number;
+  drinksRemaining: number;
+  amountPaid: number;
+  amountDue: number;
+  paymentStatus: string;
+  paymentDueDate?: Date | null;
+  status: string;
+  lockedPrice?: number | null;
+  notes?: string | null;
+  createdAt: Date;
+  payments?: {
+    id: string;
+    amount: number;
+    paymentMethod: string;
+    status: string;
+    paidAt?: Date | null;
+    notes?: string | null;
+    createdAt: Date;
+  }[];
+}
+
+export interface FullClientProfile {
+  id: string;
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  status: string;
+  role: string;
+  createdAt: Date;
+  clientProfile?: {
+    dateOfBirth?: Date | null;
+    gender?: string | null;
+    emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null;
+    medicalNotes?: string | null;
+    injuryNotes?: string | null;
+    tags: string[];
+    staffNotes?: string | null;
+    waiverSignedAt?: Date | null;
+    referralCode?: string | null;
+  } | null;
+  clientPackages: ClientPackageDetail[];
+  bookings: {
+    id: string;
+    status: string;
+    creditDeducted: boolean;
+    createdAt: Date;
+    classSession: {
+      id: string;
+      title: string;
+      startTime: Date;
+      endTime?: Date;
+      room?: string | null;
+      category: { name: string; color: string };
+      instructor: { fullName: string };
+    };
+    clientPackage?: {
+      package: { name: string };
+      remainingCredits: number;
+    } | null;
+  }[];
+}
+
+// ─── Registration Wizard State ────────────────────────────────────────────────
+
+export interface RegistrationDetails {
+  fullName: string;
+  email: string;
+  phone: string;
+  age?: string;
+  notes?: string;
+}
+
+export interface RegistrationPayment {
+  paymentStatus: "paid" | "partial" | "unpaid";
+  amountPaid: number;
+  paymentMethod: string;
+  dueDate?: string;
+  notes?: string;
+}
+
 // ─── API response helpers ─────────────────────────────────────────────────────
 
 export interface ApiResponse<T = unknown> {

@@ -159,7 +159,9 @@ export async function POST(
         amountPaid: amountPaidNum,
         amountDue,
         paymentStatus: outstanding <= 0 ? "paid" : amountPaidNum > 0 ? "partial" : "unpaid",
-        paymentDueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // Due in 3 days
+        // For memberships: payment due at cycle end (renewal date = expiry)
+        // For packs/drop-ins: payment due within 3 days of purchase
+        paymentDueDate: pkg.type === "membership" || pkg.type === "founding" ? expiry : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
         status: "active",
         notes: notes ?? null,
         createdById: user.id,

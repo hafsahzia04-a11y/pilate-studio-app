@@ -140,6 +140,39 @@ export function truncate(str: string, maxLen: number): string {
   return str.length > maxLen ? str.slice(0, maxLen) + "…" : str;
 }
 
+// ─── Effective payment status (computes overdue from date) ───────────────────
+export function computeEffectivePaymentStatus(
+  paymentStatus: string,
+  paymentDueDate?: Date | string | null
+): string {
+  if (paymentStatus === "paid" || paymentStatus === "refunded") return paymentStatus;
+  if (paymentDueDate && new Date(paymentDueDate) < new Date()) return "overdue";
+  return paymentStatus;
+}
+
+// ─── Client package overall status for UI color coding ───────────────────────
+export function clientPackageStatusColor(
+  packageStatus: string,
+  paymentStatus: string,
+  expiryDate?: Date | string | null,
+  paymentDueDate?: Date | string | null
+): "green" | "yellow" | "red" | "stone" {
+  if (packageStatus === "cancelled") return "stone";
+  const effectivePay = computeEffectivePaymentStatus(paymentStatus, paymentDueDate);
+  if (effectivePay === "overdue") return "red";
+  if (packageStatus === "expired") return "red";
+  if (effectivePay === "partial" || effectivePay === "unpaid") {
+    // Warn if due date approaching within 3 days
+    if (paymentDueDate) {
+      const daysLeft = daysUntil(paymentDueDate);
+      if (daysLeft <= 3) return "yellow";
+    }
+    return "yellow";
+  }
+  if (expiryDate && isExpiringSoon(expiryDate, 7)) return "yellow";
+  return "green";
+}
+
 // ─── Class occupancy colour ───────────────────────────────────────────────────
 export function occupancyColor(booked: number, capacity: number): string {
   const pct = booked / capacity;
