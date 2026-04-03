@@ -26,7 +26,7 @@ export default async function PaymentsPage() {
   const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
   const tomorrowEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 59);
 
-  const [payments, overduePackages, expiringPackages, dueTomorrowPackages, allClients, dropInPackage, monthlySummary, overdueBalance] =
+  const [payments, overduePackages, expiringPackages, dueTomorrowPackages, allClients, dropInPackage, allPackages, monthlySummary, overdueBalance] =
     await Promise.all([
       prisma.payment.findMany({
         take: 50,
@@ -98,6 +98,13 @@ export default async function PaymentsPage() {
         select: { id: true, name: true, price: true, classCredits: true, validityDays: true },
       }),
 
+      // All active packages for the "New Purchase" section of the payment modal
+      prisma.package.findMany({
+        where: { isActive: true, isVisible: true },
+        select: { id: true, name: true, type: true, price: true, classCredits: true, validityDays: true },
+        orderBy: [{ sortOrder: "asc" }, { price: "asc" }],
+      }),
+
       prisma.payment.aggregate({
         _sum: { amount: true },
         where: { status: "paid", paidAt: { gte: monthStart } },
@@ -158,6 +165,14 @@ export default async function PaymentsPage() {
           })),
         }))}
         dropInPrice={dropInPackage ? Number(dropInPackage.price) : 75}
+        allPackages={allPackages.map((p) => ({
+          id: p.id,
+          name: p.name,
+          type: p.type,
+          price: Number(p.price),
+          classCredits: p.classCredits,
+          validityDays: p.validityDays,
+        }))}
         totalCollected={Number(monthlySummary._sum.amount ?? 0)}
         totalOutstanding={Number(overdueBalance._sum.amountDue ?? 0)}
         overdueCount={overduePackages.length}

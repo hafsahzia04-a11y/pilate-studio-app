@@ -6,7 +6,7 @@ import { cn, formatTime, occupancyColor } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Users, Clock, MapPin, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Plus, Users, Clock, MapPin, ChevronLeft, ChevronRight, X, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface Session {
@@ -54,7 +54,7 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
   const [form, setForm] = useState({
     title: "",
     categoryId: categories[0]?.id ?? "",
-    instructorId: instructors[0]?.id ?? "",
+    instructorName: instructors[0]?.fullName ?? "",
     date: defaultDate,
     startTime: "09:00",
     durationMins: "60",
@@ -64,6 +64,8 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
     workshopPrice: "",
     usesCredits: true,
     description: "",
+    isRecurring: false,
+    repeatWeeks: "4",
   });
 
   function openForm() {
@@ -78,42 +80,62 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
   async function submitForm(e: React.FormEvent) {
     e.preventDefault();
     if (!form.title.trim()) { toast.error("Class name is required"); return; }
-    if (!form.instructorId) { toast.error("Select an instructor"); return; }
     if (!form.categoryId) { toast.error("Select a category"); return; }
+
+    // Resolve instructor: match typed name to ID, or allow free-text if no profiles exist
+    const nameEntered = form.instructorName.trim();
+    if (!nameEntered) { toast.error("Instructor name is required"); return; }
+    const matchedInstructor = instructors.find(
+      (i) => i.fullName.toLowerCase() === nameEntered.toLowerCase()
+    );
+    // If there are instructor profiles, the name must match one
+    if (instructors.length > 0 && !matchedInstructor) {
+      toast.error(`No instructor profile found for "${nameEntered}". Check the name or create their profile.`);
+      return;
+    }
+    if (instructors.length === 0) {
+      toast.error("No instructor profiles exist. Create an instructor account first.");
+      return;
+    }
+    const instructorId = matchedInstructor!.id;
 
     setSaving(true);
     try {
-      const startISO = new Date(`${form.date}T${form.startTime}:00`).toISOString();
-      const res = await fetch("/api/classes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: form.title.trim(),
-          categoryId: form.categoryId,
-          instructorId: form.instructorId,
-          startTime: startISO,
-          durationMins: Number(form.durationMins),
-          capacity: Number(form.capacity),
-          room: form.room.trim() || null,
-          isWorkshop: form.isWorkshop,
-          workshopPrice: form.isWorkshop && form.workshopPrice ? Number(form.workshopPrice) : null,
-          usesCredits: form.usesCredits,
-          description: form.description.trim() || null,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Failed to create class"); return; }
-
-      toast.success(`"${form.title}" added to schedule`);
-      setShowForm(false);
-
-      // Optimistically add to view
       const cat = categories.find((c) => c.id === form.categoryId)!;
-      const inst = instructors.find((i) => i.id === form.instructorId)!;
-      setSessions((prev) => [
-        ...prev,
-        {
+      const weeksToCreate = form.isRecurring ? Math.max(1, Number(form.repeatWeeks)) : 1;
+      const newSessions: Session[] = [];
+      let lastError = "";
+
+      for (let week = 0; week < weeksToCreate; week++) {
+        const baseDate = new Date(`${form.date}T${form.startTime}:00`);
+        const startISO = addDays(baseDate, week * 7).toISOString();
+
+        const res = await fetch("/api/classes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: form.title.trim(),
+            categoryId: form.categoryId,
+            instructorId,
+            startTime: startISO,
+            durationMins: Number(form.durationMins),
+            capacity: Number(form.capacity),
+            room: form.room.trim() || null,
+            isWorkshop: form.isWorkshop,
+            workshopPrice: form.isWorkshop && form.workshopPrice ? Number(form.workshopPrice) : null,
+            usesCredits: form.usesCredits,
+            description: form.description.trim() || null,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          lastError = data.error ?? "Failed to create class";
+          // Continue for remaining weeks even if one fails (e.g. instructor conflict)
+          continue;
+        }
+
+        newSessions.push({
           id: data.id,
           title: data.title,
           startTime: data.startTime,
@@ -127,10 +149,24 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
           status: "scheduled",
           isWorkshop: data.isWorkshop,
           category: { name: cat.name, color: cat.color },
-          instructor: { id: inst.id, fullName: inst.fullName },
+          instructor: { id: matchedInstructor!.id, fullName: matchedInstructor!.fullName },
           substituteInstructor: null,
-        },
-      ]);
+        });
+      }
+
+      if (newSessions.length > 0) {
+        setSessions((prev) => [...prev, ...newSessions]);
+        const msg = form.isRecurring
+          ? `"${form.title}" added for ${newSessions.length} week${newSessions.length !== 1 ? "s" : ""}`
+          : `"${form.title}" added to schedule`;
+        toast.success(msg);
+        if (lastError && newSessions.length < weeksToCreate) {
+          toast.error(`${weeksToCreate - newSessions.length} week(s) skipped: ${lastError}`);
+        }
+        setShowForm(false);
+      } else {
+        toast.error(lastError || "Failed to create class");
+      }
     } finally {
       setSaving(false);
     }
@@ -304,19 +340,27 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
                 </select>
               </div>
 
-              {/* Instructor */}
+              {/* Instructor — manual text input with name suggestions */}
               <div>
                 <label className={labelCls}>Instructor *</label>
-                {instructors.length === 0 ? (
-                  <p className="text-xs text-red-500 bg-red-50 rounded-xl px-3 py-2">
-                    No instructors found. Create an instructor account first via Supabase Auth, then add their profile with role = instructor.
+                <input
+                  list="instructor-suggestions"
+                  className={inputCls}
+                  placeholder="Type instructor name…"
+                  value={form.instructorName}
+                  onChange={(e) => set("instructorName", e.target.value)}
+                  autoComplete="off"
+                  required
+                />
+                <datalist id="instructor-suggestions">
+                  {instructors.map((i) => (
+                    <option key={i.id} value={i.fullName} />
+                  ))}
+                </datalist>
+                {instructors.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No instructor profiles found — create an instructor account first.
                   </p>
-                ) : (
-                  <select className={inputCls} value={form.instructorId} onChange={(e) => set("instructorId", e.target.value)} required>
-                    {instructors.map((i) => (
-                      <option key={i.id} value={i.id}>{i.fullName}</option>
-                    ))}
-                  </select>
                 )}
               </div>
 
@@ -392,6 +436,47 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
                   value={form.description}
                   onChange={(e) => set("description", e.target.value)}
                 />
+              </div>
+
+              {/* Recurring */}
+              <div className="rounded-xl border border-stone-200 p-4 space-y-3 bg-stone-50">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 text-stone-500" />
+                    <div>
+                      <p className="text-sm font-medium text-stone-700">Recurring (weekly)</p>
+                      <p className="text-xs text-stone-400">Auto-create this class every week</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => set("isRecurring", !form.isRecurring)}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                      form.isRecurring ? "bg-sage-500" : "bg-stone-200"
+                    )}
+                  >
+                    <span className={cn("inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform", form.isRecurring ? "translate-x-6" : "translate-x-1")} />
+                  </button>
+                </label>
+
+                {form.isRecurring && (
+                  <div>
+                    <label className={labelCls}>Repeat for how many weeks?</label>
+                    <select
+                      className={inputCls}
+                      value={form.repeatWeeks}
+                      onChange={(e) => set("repeatWeeks", e.target.value)}
+                    >
+                      {[2,3,4,6,8,10,12].map((w) => (
+                        <option key={w} value={String(w)}>{w} weeks</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-stone-400 mt-1">
+                      Will create {form.repeatWeeks} sessions starting from the selected date, one per week on the same day and time.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Toggles */}

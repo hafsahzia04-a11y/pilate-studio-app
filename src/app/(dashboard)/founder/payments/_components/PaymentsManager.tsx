@@ -37,12 +37,22 @@ interface ClientWithPackages {
   }[];
 }
 
+interface AvailablePackage {
+  id: string;
+  name: string;
+  type: string;
+  price: number;
+  classCredits: number;
+  validityDays: number;
+}
+
 interface Props {
   payments: Payment[];
   overduePackages: OverduePackage[];
   expiringPackages: ExpiringPackage[];
   dueTomorrowPackages: OverduePackage[];
   allClients: ClientWithPackages[];
+  allPackages: AvailablePackage[];
   dropInPrice: number;
   totalCollected: number;
   totalOutstanding: number;
@@ -53,7 +63,9 @@ interface Props {
 type Tab = "all" | "overdue" | "due_tomorrow" | "expiring";
 
 const inputCls = "w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100";
-const DROP_IN_OPTION = "__drop_in__";
+// Package option prefixes: existing client packages use their UUID directly.
+// New package purchases are prefixed with "new:" followed by the package ID.
+const NEW_PKG_PREFIX = "new:";
 
 function paymentBadge(status: string): "sage" | "danger" | "warning" | "default" | "blue" {
   const map: Record<string, "sage" | "danger" | "warning" | "default" | "blue"> = {
@@ -64,7 +76,7 @@ function paymentBadge(status: string): "sage" | "danger" | "warning" | "default"
 
 export function PaymentsManager({
   payments, overduePackages, expiringPackages, dueTomorrowPackages,
-  allClients, dropInPrice, totalCollected, totalOutstanding, overdueCount, dueTomorrowCount,
+  allClients, allPackages, dropInPrice, totalCollected, totalOutstanding, overdueCount, dueTomorrowCount,
 }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("all");
@@ -99,9 +111,13 @@ export function PaymentsManager({
 
   function onPackageChange(option: string) {
     setPackageOption(option);
-    if (option === DROP_IN_OPTION) {
-      setAmount(String(dropInPrice));
+    if (option.startsWith(NEW_PKG_PREFIX)) {
+      // New package purchase — pre-fill with full package price
+      const pkgId = option.slice(NEW_PKG_PREFIX.length);
+      const pkg = allPackages.find((p) => p.id === pkgId);
+      if (pkg) setAmount(String(pkg.price));
     } else if (option) {
+      // Existing client package — pre-fill outstanding amount
       const pkg = selectedClient?.packages.find((p) => p.id === option);
       if (pkg) setAmount(String(pkg.outstanding > 0 ? pkg.outstanding : pkg.amountDue));
     } else {
@@ -116,20 +132,37 @@ export function PaymentsManager({
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) { toast.error("Enter a valid amount"); return; }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = {
-        clientId, amount: Number(amount), paymentMethod,
-        referenceNumber: referenceNumber.trim() || null,
-        notes: notes.trim() || null,
-      };
-      if (packageOption === DROP_IN_OPTION) { body.isDropIn = true; }
-      else { body.clientPackageId = packageOption; }
-
-      const res = await fetch("/api/payments", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed");
-      toast.success("Payment recorded");
+      if (packageOption.startsWith(NEW_PKG_PREFIX)) {
+        // Sell a new package to this client (creates ClientPackage + Payment in one call)
+        const pkgId = packageOption.slice(NEW_PKG_PREFIX.length);
+        const res = await fetch(`/api/packages/${pkgId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId,
+            amountPaid: Number(amount),
+            paymentMethod,
+            notes: notes.trim() || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to assign package");
+        toast.success("Package assigned and payment recorded");
+      } else {
+        // Record payment against an existing client package
+        const body: Record<string, unknown> = {
+          clientId, amount: Number(amount), paymentMethod,
+          referenceNumber: referenceNumber.trim() || null,
+          notes: notes.trim() || null,
+          clientPackageId: packageOption,
+        };
+        const res = await fetch("/api/payments", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed");
+        toast.success("Payment recorded");
+      }
       setModalOpen(false); resetForm(); router.refresh();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
@@ -348,23 +381,33 @@ export function PaymentsManager({
                   <select className={inputCls} value={packageOption} onChange={(e) => onPackageChange(e.target.value)} required>
                     <option value="">— select package —</option>
                     {selectedClient && selectedClient.packages.length > 0 && (
-                      <optgroup label="Active Packages">
+                      <optgroup label="Existing Active Packages">
                         {selectedClient.packages.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.packageName}{p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — paid"}
+                            {p.packageName}{p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — fully paid"}
                           </option>
                         ))}
                       </optgroup>
                     )}
-                    <optgroup label="New Purchase">
-                      <option value={DROP_IN_OPTION}>Drop-in (today only) — {formatCurrency(dropInPrice)}</option>
-                    </optgroup>
+                    {allPackages.length > 0 && (
+                      <optgroup label="New Purchase (assign + record payment)">
+                        {allPackages.map((p) => (
+                          <option key={p.id} value={`${NEW_PKG_PREFIX}${p.id}`}>
+                            {p.name} — {formatCurrency(p.price)} · {p.classCredits} classes · {p.validityDays}d
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
-                  {packageOption === DROP_IN_OPTION && (
-                    <p className="text-xs text-amber-700 mt-1 bg-amber-50 rounded-lg px-3 py-1.5">
-                      New drop-in valid today only will be created for {selectedClient?.fullName}.
-                    </p>
-                  )}
+                  {packageOption.startsWith(NEW_PKG_PREFIX) && (() => {
+                    const pkgId = packageOption.slice(NEW_PKG_PREFIX.length);
+                    const pkg = allPackages.find((p) => p.id === pkgId);
+                    return pkg ? (
+                      <p className="text-xs text-sage-700 mt-1 bg-sage-50 rounded-lg px-3 py-1.5">
+                        New {pkg.name} will be assigned to {selectedClient?.fullName} — {pkg.classCredits} classes, valid {pkg.validityDays} days.
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
               )}
 
