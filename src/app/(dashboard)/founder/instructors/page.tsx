@@ -21,6 +21,7 @@ export default async function FounderInstructorsPage() {
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
 
+  // Fetch instructors — _count for taughtSessions is always safe (pre-existing table)
   const instructors = await prisma.profile.findMany({
     where: { role: "instructor" },
     include: {
@@ -28,20 +29,28 @@ export default async function FounderInstructorsPage() {
       _count: {
         select: {
           taughtSessions: { where: { status: { in: ["scheduled", "completed"] } } },
-          instructorReferrals: true,
         },
       },
     },
     orderBy: { fullName: "asc" },
   });
 
-  const salaryRecords = await prisma.instructorSalaryRecord.findMany({
-    where: {
-      month: currentMonth,
-      year: currentYear,
-      instructorId: { in: instructors.map((i) => i.id) },
-    },
-  });
+  // Fetch referral counts safely (new table — may not exist yet)
+  const referralCounts = await prisma.instructorReferral
+    .groupBy({ by: ["instructorId"], _count: { id: true } })
+    .catch(() => [] as { instructorId: string; _count: { id: number } }[]);
+  const referralMap = new Map(referralCounts.map((r) => [r.instructorId, r._count.id]));
+
+  // Fetch current-month salary records safely (new table — may not exist yet)
+  const salaryRecords = await prisma.instructorSalaryRecord
+    .findMany({
+      where: {
+        month: currentMonth,
+        year: currentYear,
+        instructorId: { in: instructors.map((i) => i.id) },
+      },
+    })
+    .catch(() => [] as Awaited<ReturnType<typeof prisma.instructorSalaryRecord.findMany>>);
 
   const salaryMap = new Map(salaryRecords.map((r) => [r.instructorId, r]));
 
@@ -74,7 +83,7 @@ export default async function FounderInstructorsPage() {
         }
       : null,
     totalSessions: i._count.taughtSessions,
-    totalReferrals: i._count.instructorReferrals,
+    totalReferrals: referralMap.get(i.id) ?? 0,
     currentSalaryRecord: salaryMap.get(i.id)
       ? {
           id: salaryMap.get(i.id)!.id,

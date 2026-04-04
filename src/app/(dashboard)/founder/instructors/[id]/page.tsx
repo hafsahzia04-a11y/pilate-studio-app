@@ -17,6 +17,7 @@ export default async function InstructorDetailPage({ params }: { params: { id: s
   });
   if (!actor || actor.role !== "founder") redirect("/login");
 
+  // Core instructor data — taughtSessions and instructorProfile are pre-existing tables
   const instructor = await prisma.profile.findUnique({
     where: { id: params.id, role: "instructor" },
     include: {
@@ -34,21 +35,29 @@ export default async function InstructorDetailPage({ params }: { params: { id: s
           },
         },
       },
-      salaryRecords: {
-        orderBy: [{ year: "desc" }, { month: "desc" }],
-      },
-      instructorReferrals: {
-        include: {
-          client: { select: { id: true, fullName: true, email: true, status: true } },
-        },
-        orderBy: { referralDate: "desc" },
-      },
     },
   });
 
   if (!instructor) notFound();
 
-  // Serialise all dates to ISO strings so client receives plain objects
+  // New tables — safe fallback to [] if not migrated yet
+  const salaryRecords = await prisma.instructorSalaryRecord
+    .findMany({
+      where: { instructorId: params.id },
+      orderBy: [{ year: "desc" }, { month: "desc" }],
+    })
+    .catch(() => [] as Awaited<ReturnType<typeof prisma.instructorSalaryRecord.findMany>>);
+
+  const referrals = await prisma.instructorReferral
+    .findMany({
+      where: { instructorId: params.id },
+      include: {
+        client: { select: { id: true, fullName: true, email: true, status: true } },
+      },
+      orderBy: { referralDate: "desc" },
+    })
+    .catch(() => [] as { id: string; instructorId: string; clientId: string; isActive: boolean; referralDate: Date; notes: string | null; createdAt: Date; updatedAt: Date; client: { id: string; fullName: string; email: string; status: "active" | "inactive" | "suspended" } }[]);
+
   const serialised = {
     id: instructor.id,
     fullName: instructor.fullName,
@@ -89,7 +98,7 @@ export default async function InstructorDetailPage({ params }: { params: { id: s
           }
         : null,
     })),
-    salaryRecords: instructor.salaryRecords.map((r) => ({
+    salaryRecords: salaryRecords.map((r) => ({
       id: r.id,
       month: r.month,
       year: r.year,
@@ -101,7 +110,7 @@ export default async function InstructorDetailPage({ params }: { params: { id: s
       paymentMethod: r.paymentMethod,
       notes: r.notes,
     })),
-    instructorReferrals: instructor.instructorReferrals.map((r) => ({
+    instructorReferrals: referrals.map((r) => ({
       id: r.id,
       clientId: r.clientId,
       isActive: r.isActive,
@@ -111,7 +120,6 @@ export default async function InstructorDetailPage({ params }: { params: { id: s
     })),
   };
 
-  // All clients for referral picker
   const allClients = await prisma.profile.findMany({
     where: { role: "client", status: "active" },
     select: { id: true, fullName: true, email: true },
