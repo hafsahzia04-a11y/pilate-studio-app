@@ -37,6 +37,7 @@ const navByRole: Record<UserRole, NavItem[]> = {
     { label: "Schedule", href: "/founder/schedule", icon: <Calendar className="h-4 w-4" /> },
     { label: "Classes", href: "/founder/classes", icon: <Dumbbell className="h-4 w-4" /> },
     { label: "Clients", href: "/founder/clients", icon: <Users className="h-4 w-4" /> },
+    { label: "Instructors", href: "/founder/instructors", icon: <UserCheck className="h-4 w-4" /> },
     { label: "Packages", href: "/founder/packages", icon: <Package className="h-4 w-4" /> },
     { label: "Payments", href: "/founder/payments", icon: <CreditCard className="h-4 w-4" /> },
     { label: "Inventory", href: "/founder/inventory", icon: <ShoppingBag className="h-4 w-4" /> },

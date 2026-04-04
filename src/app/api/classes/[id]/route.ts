@@ -9,6 +9,7 @@ import { audit, AUDIT_ACTIONS } from "@/lib/audit";
 import { apiError, apiSuccess } from "@/lib/utils";
 import { sendWhatsAppMessage, messages } from "@/lib/whatsapp";
 import { formatDateTime } from "@/lib/utils";
+import { addMinutes } from "date-fns";
 
 // ─── GET /api/classes/[id] ────────────────────────────────────────────────────
 
@@ -94,23 +95,53 @@ export async function PATCH(
   const instructorChanging =
     body.instructorId && body.instructorId !== session.instructorId;
 
+  // Recalculate times if startTime or durationMins provided
+  let newStartTime: Date | undefined;
+  let newEndTime: Date | undefined;
+  if (body.startTime) {
+    newStartTime = new Date(body.startTime);
+    const dur = body.durationMins ? Number(body.durationMins) : session.durationMins;
+    newEndTime = addMinutes(newStartTime, dur);
+
+    // Check instructor conflict (exclude self)
+    const targetInstructorId = body.instructorId ?? session.instructorId;
+    const conflict = await prisma.classSession.findFirst({
+      where: {
+        id: { not: params.id },
+        instructorId: targetInstructorId,
+        status: "scheduled",
+        startTime: { lt: newEndTime },
+        endTime: { gt: newStartTime },
+      },
+    });
+    if (conflict) {
+      return apiError(`Instructor conflict with "${conflict.title}"`);
+    }
+  } else if (body.durationMins) {
+    newEndTime = addMinutes(session.startTime, Number(body.durationMins));
+  }
+
   const updated = await prisma.classSession.update({
     where: { id: params.id },
     data: {
       ...(body.title && { title: body.title }),
+      ...(body.categoryId && { categoryId: body.categoryId }),
       ...(body.instructorId && { instructorId: body.instructorId }),
       ...(body.substituteInstructorId !== undefined && {
         substituteInstructorId: body.substituteInstructorId,
       }),
       ...(body.room !== undefined && { room: body.room }),
       ...(body.capacity && { capacity: Number(body.capacity) }),
-      ...(body.workshopPrice !== undefined && {
-        workshopPrice: body.workshopPrice,
-      }),
+      ...(body.workshopPrice !== undefined && { workshopPrice: body.workshopPrice }),
       ...(body.description !== undefined && { description: body.description }),
+      ...(body.status && { status: body.status }),
+      ...(body.durationMins && { durationMins: Number(body.durationMins) }),
+      ...(newStartTime && { startTime: newStartTime }),
+      ...(newEndTime && { endTime: newEndTime }),
     },
     include: {
       instructor: { select: { fullName: true } },
+      category: { select: { name: true, color: true } },
     },
   });
 

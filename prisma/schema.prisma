@@ -186,6 +186,13 @@ model Profile {
   auditLogs           AuditLog[]
   notificationsLog    NotificationLog[]
 
+  // Instructor module
+  salaryRecords         InstructorSalaryRecord[]
+  instructorReferrals   InstructorReferral[]     @relation("InstructorGivingReferral")
+  clientOfReferral      InstructorReferral[]     @relation("ClientFromReferral")
+  classMetrics          ClassAttendanceRecord[]  @relation("InstructorMetrics")
+  metricsRecordedBy     ClassAttendanceRecord[]  @relation("MetricsRecordedBy")
+
   @@map("profiles")
   @@schema("public")
 }
@@ -223,14 +230,21 @@ model ClientProfile {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model InstructorProfile {
-  id             String    @id @db.Uuid
-  profile        Profile   @relation(fields: [id], references: [id], onDelete: Cascade)
+  id                String     @id @db.Uuid
+  profile           Profile    @relation(fields: [id], references: [id], onDelete: Cascade)
 
-  bio            String?
-  specializations String[] @default([])  // ['yoga','pilates','strength']
-  payoutType     PayoutType @default(per_class) @map("payout_type")
-  payoutRate     Decimal    @default(0) @map("payout_rate") @db.Decimal(10, 2)
-  isAvailable    Boolean    @default(true) @map("is_available")
+  bio               String?
+  specializations   String[]   @default([])          // ['yoga','pilates','strength'] — used as teaching categories
+  payoutType        PayoutType @default(per_class) @map("payout_type")
+  payoutRate        Decimal    @default(0) @map("payout_rate") @db.Decimal(10, 2)
+  isAvailable       Boolean    @default(true) @map("is_available")
+
+  // Extended fields for full instructor management
+  startDate         DateTime?  @map("start_date") @db.Date
+  salary            Decimal?   @db.Decimal(10, 2)             // Basic monthly salary
+  salaryDueDay      Int?       @map("salary_due_day")         // Day of month (1–31) salary is due
+  commissionPercent Decimal?   @map("commission_percent") @db.Decimal(5, 2)
+  notes             String?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -371,9 +385,10 @@ model ClassSession {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  bookings     Booking[]
-  waitlist     WaitlistEntry[]
-  attendance   AttendanceLog[]
+  bookings      Booking[]
+  waitlist      WaitlistEntry[]
+  attendance    AttendanceLog[]
+  classMetric   ClassAttendanceRecord?
 
   @@index([startTime])
   @@index([instructorId])
@@ -814,5 +829,89 @@ model InstructorPayout {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("instructor_payouts")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTRUCTOR SALARY RECORDS  (monthly salary tracking per instructor)
+// One row per instructor per month. Never overwrite; update paymentStatus.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InstructorSalaryRecord {
+  id            String  @id @default(cuid())
+  instructorId  String  @map("instructor_id") @db.Uuid
+  instructor    Profile @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+
+  month         Int                         // 1 = January … 12 = December
+  year          Int
+  amountDue     Decimal  @map("amount_due") @db.Decimal(10, 2)
+  amountPaid    Decimal  @default(0) @map("amount_paid") @db.Decimal(10, 2)
+  paymentStatus String   @default("unpaid") @map("payment_status") // unpaid | partial | paid
+  dueDate       DateTime @map("due_date")
+  paidAt        DateTime? @map("paid_at")
+  paymentMethod String?  @map("payment_method")
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([instructorId, month, year])
+  @@index([instructorId])
+  @@index([paymentStatus])
+  @@map("instructor_salary_records")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTRUCTOR REFERRALS  (clients referred by a specific instructor)
+// Commission only applies if client is still active this month.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InstructorReferral {
+  id           String  @id @default(cuid())
+  instructorId String  @map("instructor_id") @db.Uuid
+  instructor   Profile @relation("InstructorGivingReferral", fields: [instructorId], references: [id], onDelete: Cascade)
+  clientId     String  @map("client_id") @db.Uuid
+  client       Profile @relation("ClientFromReferral", fields: [clientId], references: [id], onDelete: Cascade)
+
+  referralDate DateTime @default(now()) @map("referral_date")
+  isActive     Boolean  @default(true) @map("is_active") // Still attending this month?
+  notes        String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([instructorId, clientId])
+  @@index([instructorId])
+  @@map("instructor_referrals")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLASS ATTENDANCE RECORDS  (manual daily attendance entry per class session)
+// Founder/reception enters actual headcount per class.
+// Feeds instructor performance analytics.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClassAttendanceRecord {
+  id             String       @id @default(cuid())
+  classSessionId String       @unique @map("class_session_id")
+  classSession   ClassSession @relation(fields: [classSessionId], references: [id], onDelete: Cascade)
+  instructorId   String       @map("instructor_id") @db.Uuid
+  instructor     Profile      @relation("InstructorMetrics", fields: [instructorId], references: [id])
+
+  bookedCount    Int @default(0) @map("booked_count")
+  attendedCount  Int @default(0) @map("attended_count")
+  noShowCount    Int @default(0) @map("no_show_count")
+  notes          String?
+
+  recordedById   String  @map("recorded_by_id") @db.Uuid
+  recordedBy     Profile @relation("MetricsRecordedBy", fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([instructorId])
+  @@map("class_attendance_records")
   @@schema("public")
 }

@@ -93,4 +93,13 @@ export const AUDIT_ACTIONS = {
 
   // Notifications
   WHATSAPP_SENT: "notification.whatsapp_sent",
+
+  // Instructors
+  INSTRUCTOR_CREATED: "instructor.created",
+  INSTRUCTOR_UPDATED: "instructor.updated",
+  SALARY_RECORD_CREATED: "instructor.salary_record_created",
+  SALARY_PAYMENT_RECORDED: "instructor.salary_payment_recorded",
+  REFERRAL_ADDED: "instructor.referral_added",
+  REFERRAL_STATUS_UPDATED: "instructor.referral_status_updated",
+  CLASS_ATTENDANCE_RECORDED: "class_session.attendance_recorded",
 } as const;

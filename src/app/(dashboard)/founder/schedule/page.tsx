@@ -19,7 +19,7 @@ export default async function FounderSchedulePage() {
   if (!profile || profile.role !== "founder") redirect("/login");
 
   const from = startOfDay(new Date());
-  const to = addDays(from, 7);
+  const to = addDays(from, 14);
 
   const sessions = await prisma.classSession.findMany({
     where: {
