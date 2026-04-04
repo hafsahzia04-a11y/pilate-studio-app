@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X, Calendar } from "lucide-react";
+import { DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X, Calendar, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -82,6 +82,8 @@ export function PaymentsManager({
   const [tab, setTab] = useState<Tab>("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [localPayments, setLocalPayments] = useState(payments);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [clientId, setClientId] = useState("");
   const [packageOption, setPackageOption] = useState("");
@@ -91,6 +93,20 @@ export function PaymentsManager({
   const [notes, setNotes] = useState("");
 
   const selectedClient = allClients.find((c) => c.id === clientId) ?? null;
+
+  async function deletePayment(id: string) {
+    if (!confirm("Delete this payment record? This will mark it as refunded and reverse the amount from the client's package balance.")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/payments/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Failed to delete"); return; }
+      setLocalPayments((prev) => prev.filter((p) => p.id !== id));
+      toast.success("Payment deleted");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   function resetForm() {
     setClientId(""); setPackageOption(""); setAmount("");
@@ -227,7 +243,7 @@ export function PaymentsManager({
       {/* All payments */}
       {tab === "all" && (
         <Card className="overflow-hidden">
-          {payments.length === 0 ? (
+          {localPayments.length === 0 ? (
             <div className="p-12 text-center">
               <CheckCircle className="h-8 w-8 text-stone-300 mx-auto mb-2" />
               <p className="text-stone-400 text-sm">No payments recorded yet.</p>
@@ -237,13 +253,13 @@ export function PaymentsManager({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-stone-100 bg-cream-50">
-                    {["Client", "Package", "Amount (PKR)", "Method", "Status", "Due Date", "Paid At"].map((h) => (
+                    {["Client", "Package", "Amount (PKR)", "Method", "Status", "Due Date", "Paid At", ""].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {payments.map((p) => (
+                  {localPayments.map((p) => (
                     <tr key={p.id} className={cn("transition-colors",
                       p.status === "overdue" ? "bg-red-50 hover:bg-red-100" : "hover:bg-cream-50")}>
                       <td className="px-4 py-3">
@@ -258,6 +274,16 @@ export function PaymentsManager({
                         {p.dueDate ? formatDate(p.dueDate) : "—"}
                       </td>
                       <td className="px-4 py-3 text-stone-500 text-xs">{p.paidAt ? formatDate(p.paidAt) : "—"}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => deletePayment(p.id)}
+                          disabled={deletingId === p.id}
+                          className="text-stone-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                          title="Delete payment"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -204,7 +204,7 @@ export async function PATCH(request: NextRequest) {
   if (actor?.role !== "founder") return apiError("Only founders can edit products", 403);
 
   const body = await request.json();
-  const { id, name, description, price, lowStockThreshold, category, isActive } = body;
+  const { id, name, description, price, stockQuantity, lowStockThreshold, category, isActive } = body;
   if (!id) return apiError("Product id required");
 
   const old = await prisma.product.findUnique({ where: { id } });
@@ -216,6 +216,7 @@ export async function PATCH(request: NextRequest) {
       ...(name !== undefined && { name }),
       ...(description !== undefined && { description }),
       ...(price !== undefined && { price: Number(price) }),
+      ...(stockQuantity !== undefined && { stockQuantity: Number(stockQuantity) }),
       ...(lowStockThreshold !== undefined && { lowStockThreshold: Number(lowStockThreshold) }),
       ...(category !== undefined && { category }),
       ...(isActive !== undefined && { isActive }),

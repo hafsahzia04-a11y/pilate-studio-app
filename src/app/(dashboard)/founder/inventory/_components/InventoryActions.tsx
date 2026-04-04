@@ -158,6 +158,11 @@ export function InventoryManager({ initialProducts }: { initialProducts: Product
   async function submitEdit(e: React.FormEvent) {
     e.preventDefault();
     if (!selected) return;
+    if (!form.name.trim()) { toast.error("Name required"); return; }
+    const priceNum = Number(form.price);
+    if (isNaN(priceNum) || priceNum < 0) { toast.error("Valid price required"); return; }
+    const qtyNum = Number(form.stockQuantity);
+    if (isNaN(qtyNum) || qtyNum < 0) { toast.error("Valid quantity required"); return; }
     setSaving(true);
     try {
       const res = await fetch("/api/inventory", {
@@ -167,7 +172,8 @@ export function InventoryManager({ initialProducts }: { initialProducts: Product
           id: selected.id,
           name: form.name.trim(),
           description: form.description.trim() || null,
-          price: Number(form.price),
+          price: priceNum,
+          stockQuantity: qtyNum,
           lowStockThreshold: Number(form.lowStockThreshold),
           category: form.category,
         }),
@@ -176,7 +182,17 @@ export function InventoryManager({ initialProducts }: { initialProducts: Product
       if (!res.ok) { toast.error(data.error ?? "Failed"); return; }
       setProducts((prev) =>
         prev.map((p) =>
-          p.id === selected.id ? { ...p, ...data.data, price: Number(data.data.price) } : p
+          p.id === selected.id
+            ? {
+                ...p,
+                name: data.data.name,
+                description: data.data.description,
+                price: Number(data.data.price),
+                stockQuantity: data.data.stockQuantity,
+                lowStockThreshold: data.data.lowStockThreshold,
+                category: data.data.category,
+              }
+            : p
         )
       );
       toast.success("Product updated");
@@ -440,19 +456,20 @@ export function InventoryManager({ initialProducts }: { initialProducts: Product
                 </div>
               </div>
 
-              {modal === "add" && (
-                <div>
-                  <label className={labelCls}>Opening Stock</label>
-                  <input
-                    type="number"
-                    min="0"
-                    className={inputCls}
-                    placeholder="0"
-                    value={form.stockQuantity}
-                    onChange={(e) => set("stockQuantity", e.target.value)}
-                  />
-                </div>
-              )}
+              <div>
+                <label className={labelCls}>{modal === "add" ? "Opening Stock" : "Current Quantity"}</label>
+                <input
+                  type="number"
+                  min="0"
+                  className={inputCls}
+                  placeholder="0"
+                  value={form.stockQuantity}
+                  onChange={(e) => set("stockQuantity", e.target.value)}
+                />
+                {modal === "edit" && (
+                  <p className="text-xs text-stone-400 mt-1">Set the exact quantity on hand right now.</p>
+                )}
+              </div>
 
               <div>
                 <label className={labelCls}>

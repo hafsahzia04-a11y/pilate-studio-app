@@ -10,7 +10,7 @@ import { cn, formatTime } from "@/lib/utils";
 import {
   Phone, Mail, Calendar, Pencil, X, Plus, ChevronLeft,
   Wallet, Users, TrendingUp, CheckCircle2, AlertCircle,
-  UserPlus, BarChart2, Clock,
+  UserPlus, BarChart2, Clock, Trash2, RefreshCw,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import toast from "react-hot-toast";
@@ -127,6 +127,8 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
     amountDue: String(initial.instructorProfile?.salary ?? ""),
     dueDate: "",
     notes: "",
+    isRecurring: false,
+    recurringMonths: "3",
   });
 
   // Record salary payment modal
@@ -186,23 +188,54 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
 
   async function saveSalaryRecord(e: React.FormEvent) {
     e.preventDefault();
+    if (!salaryForm.dueDate) { toast.error("Due date is required"); return; }
     setSaving(true);
     try {
-      const res = await fetch(`/api/instructors/${instructor.id}/salary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          month: Number(salaryForm.month),
-          year: Number(salaryForm.year),
-          amountDue: Number(salaryForm.amountDue),
-          dueDate: salaryForm.dueDate,
-          notes: salaryForm.notes.trim() || null,
-        }),
-      });
-      if (!res.ok) { const d = await res.json(); toast.error(d.error ?? "Failed"); return; }
-      toast.success("Salary record saved");
+      const months = salaryForm.isRecurring ? Math.max(1, Number(salaryForm.recurringMonths)) : 1;
+      let startMonth = Number(salaryForm.month);
+      let startYear = Number(salaryForm.year);
+      const baseDate = new Date(salaryForm.dueDate);
+      let created = 0;
+
+      for (let i = 0; i < months; i++) {
+        // Compute due date for this iteration: same day, offset by i months
+        const dueDate = new Date(baseDate);
+        dueDate.setMonth(dueDate.getMonth() + i);
+        const m = (startMonth - 1 + i) % 12 + 1;
+        const y = startYear + Math.floor((startMonth - 1 + i) / 12);
+
+        const res = await fetch(`/api/instructors/${instructor.id}/salary`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            month: m,
+            year: y,
+            amountDue: Number(salaryForm.amountDue),
+            dueDate: dueDate.toISOString(),
+            notes: salaryForm.notes.trim() || null,
+          }),
+        });
+        if (res.ok) created++;
+      }
+
+      toast.success(salaryForm.isRecurring ? `${created} salary records created` : "Salary record saved");
       setShowSalaryForm(false);
       router.refresh();
+    } finally { setSaving(false); }
+  }
+
+  async function deleteInstructor() {
+    if (!confirm(`Permanently deactivate ${instructor.fullName}? They will be marked inactive and removed from scheduling.`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/instructors/${instructor.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "inactive" }),
+      });
+      if (!res.ok) { const d = await res.json(); toast.error(d.error ?? "Failed"); return; }
+      toast.success("Instructor deactivated");
+      router.push("/founder/instructors");
     } finally { setSaving(false); }
   }
 
@@ -324,9 +357,19 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
               </div>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEdit(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit Profile
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowEdit(true)}>
+              <Pencil className="h-3.5 w-3.5" /> Edit Profile
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-red-500 border-red-200 hover:bg-red-50"
+              onClick={deleteInstructor}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          </div>
         </div>
 
         {instructor.instructorProfile?.bio && (
@@ -638,14 +681,15 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
                 </select>
               </div>
               {editForm.payoutType === "salary" ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-3">
                   <div>
                     <label className={labelCls}>Monthly Salary (PKR)</label>
-                    <input type="number" className={inputCls} value={editForm.salary} onChange={(e) => setEditForm((f) => ({ ...f, salary: e.target.value }))} />
+                    <input type="number" className={inputCls} value={editForm.salary} onChange={(e) => setEditForm((f) => ({ ...f, salary: e.target.value }))} placeholder="e.g. 50000" />
                   </div>
                   <div>
-                    <label className={labelCls}>Due Day</label>
-                    <input type="number" min="1" max="31" className={inputCls} value={editForm.salaryDueDay} onChange={(e) => setEditForm((f) => ({ ...f, salaryDueDay: e.target.value }))} />
+                    <label className={labelCls}>Salary Due Day <span className="text-stone-400">(day of month, e.g. 1 = 1st of each month)</span></label>
+                    <input type="number" min="1" max="31" className={inputCls} value={editForm.salaryDueDay} onChange={(e) => setEditForm((f) => ({ ...f, salaryDueDay: e.target.value }))} placeholder="e.g. 1" />
+                    <p className="text-xs text-stone-400 mt-1">Use the Salary tab to create individual monthly records with exact due dates.</p>
                   </div>
                 </div>
               ) : (
@@ -674,7 +718,7 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
           <form onSubmit={saveSalaryRecord} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelCls}>Month *</label>
+                <label className={labelCls}>Starting Month *</label>
                 <select className={inputCls} value={salaryForm.month} onChange={(e) => setSalaryForm((f) => ({ ...f, month: e.target.value }))}>
                   {MONTH_NAMES.map((m, i) => <option key={i} value={String(i + 1)}>{m}</option>)}
                 </select>
@@ -691,14 +735,52 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
               </div>
               <div>
                 <label className={labelCls}>Due Date *</label>
-                <input type="date" className={inputCls} value={salaryForm.dueDate} onChange={(e) => setSalaryForm((f) => ({ ...f, dueDate: e.target.value }))} required />
+                <input
+                  type="date"
+                  className={inputCls}
+                  value={salaryForm.dueDate}
+                  onChange={(e) => setSalaryForm((f) => ({ ...f, dueDate: e.target.value }))}
+                  required
+                />
               </div>
             </div>
+
+            {/* Recurring toggle */}
+            <div className="rounded-xl border border-stone-200 p-4 bg-stone-50 space-y-3">
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 text-stone-500" />
+                  <div>
+                    <p className="text-sm font-medium text-stone-700">Recurring (monthly)</p>
+                    <p className="text-xs text-stone-400">Auto-create records for multiple months</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSalaryForm((f) => ({ ...f, isRecurring: !f.isRecurring }))}
+                  className={cn("relative inline-flex h-6 w-11 items-center rounded-full transition-colors", salaryForm.isRecurring ? "bg-sage-500" : "bg-stone-200")}
+                >
+                  <span className={cn("inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform", salaryForm.isRecurring ? "translate-x-6" : "translate-x-1")} />
+                </button>
+              </label>
+              {salaryForm.isRecurring && (
+                <div>
+                  <label className={labelCls}>Generate records for how many months?</label>
+                  <select className={inputCls} value={salaryForm.recurringMonths} onChange={(e) => setSalaryForm((f) => ({ ...f, recurringMonths: e.target.value }))}>
+                    {[2,3,4,6,9,12].map((n) => <option key={n} value={String(n)}>{n} months</option>)}
+                  </select>
+                  <p className="text-xs text-stone-400 mt-1">
+                    Due dates will shift forward by 1 month each record. Records already existing for a month will be updated.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div>
               <label className={labelCls}>Notes</label>
               <input className={inputCls} value={salaryForm.notes} onChange={(e) => setSalaryForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
             </div>
-            <ModalActions onClose={() => setShowSalaryForm(false)} saving={saving} submitLabel="Save Record" />
+            <ModalActions onClose={() => setShowSalaryForm(false)} saving={saving} submitLabel={salaryForm.isRecurring ? `Create ${salaryForm.recurringMonths} Records` : "Save Record"} />
           </form>
         </Modal>
       )}
