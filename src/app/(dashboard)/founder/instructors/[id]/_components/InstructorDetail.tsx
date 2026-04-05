@@ -532,7 +532,8 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
       {/* ── Tab: Referrals ─────────────────────────────────────────────────────── */}
       {activeTab === "referrals" && (
         <div className="space-y-4">
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-stone-400 italic">Commission = 15% of client&apos;s active package value</p>
             <Button size="sm" onClick={() => setShowReferralForm(true)}>
               <UserPlus className="h-4 w-4" /> Add Referral
             </Button>
@@ -550,40 +551,104 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
                   <tr>
                     <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Client</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Referred</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Commission</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Active</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Active Package</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Commission (15%)</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-stone-500">Status</th>
                     <th className="w-20" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-50">
                   {instructor.instructorReferrals.map((r) => (
-                    <tr key={r.id} className="hover:bg-cream-50">
-                      <td className="px-4 py-3">
-                        <Link href={`/founder/clients/${r.clientId}`} className="font-medium text-stone-900 hover:text-sage-700 hover:underline">
-                          {r.client.fullName}
-                        </Link>
-                        <p className="text-xs text-stone-400">{r.client.email}</p>
-                      </td>
-                      <td className="px-4 py-3 text-stone-600">{format(parseISO(r.referralDate), "d MMM yyyy")}</td>
-                      <td className="px-4 py-3 text-stone-600">
-                        {r.isActive && instructor.instructorProfile?.commissionPercent != null
-                          ? `${instructor.instructorProfile.commissionPercent}% applicable`
-                          : <span className="text-stone-300">Zero (inactive)</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={r.isActive ? "sage" : "default"}>{r.isActive ? "Active" : "Inactive"}</Badge>
-                      </td>
-                      <td className="pr-4 text-right">
-                        <button
-                          onClick={() => toggleReferral(r.id, !r.isActive)}
-                          className="text-xs text-stone-500 hover:text-stone-700 hover:underline"
-                        >
-                          {r.isActive ? "Mark Inactive" : "Mark Active"}
-                        </button>
-                      </td>
-                    </tr>
+                    <>
+                      <tr key={r.id} className="hover:bg-cream-50">
+                        <td className="px-4 py-3">
+                          <Link href={`/founder/clients/${r.clientId}`} className="font-medium text-stone-900 hover:text-sage-700 hover:underline">
+                            {r.client.fullName}
+                          </Link>
+                          <p className="text-xs text-stone-400">{r.client.email}</p>
+                        </td>
+                        <td className="px-4 py-3 text-stone-600">{format(parseISO(r.referralDate), "d MMM yyyy")}</td>
+                        <td className="px-4 py-3 text-stone-600">
+                          {r.clientPackage
+                            ? <span>{r.clientPackage.packageName} <span className="text-stone-400">(PKR {r.clientPackage.amountDue.toLocaleString()})</span></span>
+                            : <span className="text-stone-300">No active package</span>}
+                        </td>
+                        <td className="px-4 py-3 font-medium">
+                          {r.isActive && (r.commissionAmount ?? 0) > 0
+                            ? <span className="text-sage-700">PKR {(r.commissionAmount ?? 0).toLocaleString()}</span>
+                            : <span className="text-stone-300">{r.isActive ? "PKR 0" : "Inactive"}</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={r.isActive ? "sage" : "default"}>{r.isActive ? "Active" : "Inactive"}</Badge>
+                        </td>
+                        <td className="pr-4 text-right">
+                          <button
+                            onClick={() => openReferralEdit(r)}
+                            className="text-stone-400 hover:text-stone-700 transition-colors"
+                            title="Edit referral"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                      {editingReferralId === r.id && (
+                        <tr key={`${r.id}-edit`} className="bg-stone-50">
+                          <td colSpan={6} className="px-4 py-4">
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div>
+                                <label className={labelCls}>Referral Date</label>
+                                <input
+                                  type="date"
+                                  className={inputCls}
+                                  value={referralEditForm.referralDate}
+                                  onChange={(e) => setReferralEditForm((f) => ({ ...f, referralDate: e.target.value }))}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-40">
+                                <label className={labelCls}>Notes</label>
+                                <input
+                                  className={inputCls}
+                                  value={referralEditForm.notes}
+                                  onChange={(e) => setReferralEditForm((f) => ({ ...f, notes: e.target.value }))}
+                                  placeholder="Optional notes"
+                                />
+                              </div>
+                              <div>
+                                <label className={labelCls}>Status</label>
+                                <select
+                                  className={inputCls}
+                                  value={referralEditForm.isActive ? "active" : "inactive"}
+                                  onChange={(e) => setReferralEditForm((f) => ({ ...f, isActive: e.target.value === "active" }))}
+                                >
+                                  <option value="active">Active</option>
+                                  <option value="inactive">Inactive</option>
+                                </select>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => saveReferralEdit(r.id)} loading={saving}>Save</Button>
+                                <Button size="sm" variant="outline" onClick={() => setEditingReferralId(null)}>Cancel</Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
+                <tfoot className="bg-stone-50 border-t border-stone-200">
+                  <tr>
+                    <td colSpan={3} className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">
+                      Total Commission (active referrals)
+                    </td>
+                    <td className="px-4 py-3 font-bold text-stone-900">
+                      PKR {instructor.instructorReferrals
+                        .filter((r) => r.isActive)
+                        .reduce((sum, r) => sum + (r.commissionAmount ?? 0), 0)
+                        .toLocaleString()}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}

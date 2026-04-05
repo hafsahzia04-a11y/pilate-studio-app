@@ -165,6 +165,7 @@ function PerkRow({
   used,
   remaining,
   onUse,
+  onSet,
   loading,
 }: {
   label: string;
@@ -173,8 +174,25 @@ function PerkRow({
   used: number;
   remaining: number;
   onUse: () => void;
+  onSet: (value: number) => Promise<void>;
   loading: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(String(remaining));
+  const [setLoading, setSetLoading] = useState(false);
+
+  async function handleConfirmSet() {
+    const val = Number(editValue);
+    if (isNaN(val) || val < 0) return;
+    setSetLoading(true);
+    try {
+      await onSet(val);
+      setEditing(false);
+    } finally {
+      setSetLoading(false);
+    }
+  }
+
   if (total === 0) {
     return (
       <div className="flex items-center justify-between py-3 border-b border-stone-100 last:border-0">
@@ -188,40 +206,68 @@ function PerkRow({
   }
 
   return (
-    <div className="flex items-center justify-between py-3 border-b border-stone-100 last:border-0">
-      <div className="flex items-center gap-3">
-        <div className="text-sage-600">{icon}</div>
-        <div>
-          <p className="text-sm font-medium text-stone-800">{label}</p>
-          <p className="text-xs text-stone-500">
-            {used} used · {remaining} remaining of {total}
-          </p>
+    <div className="py-3 border-b border-stone-100 last:border-0">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="text-sage-600">{icon}</div>
+          <div>
+            <p className="text-sm font-medium text-stone-800">{label}</p>
+            <p className="text-xs text-stone-500">
+              {used} used · {remaining} remaining of {total}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Progress dots */}
+          <div className="flex gap-1">
+            {Array.from({ length: Math.min(total, 10) }).map((_, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "w-2.5 h-2.5 rounded-full",
+                  i < used ? "bg-stone-300" : "bg-sage-400"
+                )}
+              />
+            ))}
+            {total > 10 && <span className="text-xs text-stone-400 ml-1">+{total - 10}</span>}
+          </div>
+          <button
+            onClick={() => { setEditValue(String(remaining)); setEditing((v) => !v); }}
+            className="text-stone-400 hover:text-stone-600 transition-colors p-1 rounded-lg hover:bg-stone-100"
+            title="Set quantity manually"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onUse}
+            disabled={remaining === 0 || loading}
+            loading={loading}
+            className="text-xs"
+          >
+            Mark Used
+          </Button>
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        {/* Progress dots */}
-        <div className="flex gap-1">
-          {Array.from({ length: total }).map((_, i) => (
-            <div
-              key={i}
-              className={cn(
-                "w-2.5 h-2.5 rounded-full",
-                i < used ? "bg-stone-300" : "bg-sage-400"
-              )}
-            />
-          ))}
+      {editing && (
+        <div className="mt-2 flex items-center gap-2 pl-10">
+          <input
+            type="number"
+            min={0}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            className="w-20 h-8 px-2 rounded-lg border border-stone-200 text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100"
+            autoFocus
+          />
+          <Button size="sm" loading={setLoading} onClick={handleConfirmSet} className="text-xs h-8">
+            Set
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setEditing(false)} className="text-xs h-8">
+            Cancel
+          </Button>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onUse}
-          disabled={remaining === 0 || loading}
-          loading={loading}
-          className="text-xs"
-        >
-          Mark Used
-        </Button>
-      </div>
+      )}
     </div>
   );
 }
@@ -295,6 +341,25 @@ export function ClientProfile({ client }: Props) {
     } finally {
       setPerkLoading(null);
     }
+  }
+
+  async function handleSetPerk(field: "guestPassesRemaining" | "drinksRemaining", value: number) {
+    if (!activePackage) return;
+    const res = await fetch(`/api/client-packages/${activePackage.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_perks", [field]: value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Failed");
+    setPackages((prev) =>
+      prev.map((cp) =>
+        cp.id === activePackage.id
+          ? { ...cp, guestPassesRemaining: data.guestPassesRemaining, drinksRemaining: data.drinksRemaining }
+          : cp
+      )
+    );
+    toast.success("Perk quantity updated");
   }
 
   async function handleRecordPayment() {
@@ -613,6 +678,7 @@ export function ClientProfile({ client }: Props) {
                   used={activePackage.package.guestPassesPerPeriod - activePackage.guestPassesRemaining}
                   remaining={activePackage.guestPassesRemaining}
                   onUse={() => setGuestPassConfirm(true)}
+                  onSet={(val) => handleSetPerk("guestPassesRemaining", val)}
                   loading={perkLoading === "guest"}
                 />
                 <PerkRow
@@ -622,6 +688,7 @@ export function ClientProfile({ client }: Props) {
                   used={activePackage.package.drinksPerPeriod - activePackage.drinksRemaining}
                   remaining={activePackage.drinksRemaining}
                   onUse={() => setDrinkConfirm(true)}
+                  onSet={(val) => handleSetPerk("drinksRemaining", val)}
                   loading={perkLoading === "drink"}
                 />
 
