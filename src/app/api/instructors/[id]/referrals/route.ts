@@ -29,7 +29,29 @@ export async function GET(
     orderBy: { referralDate: "desc" },
   });
 
-  return apiSuccess(referrals);
+  // For each referral, fetch the client's most recent active package
+  const enriched = await Promise.all(
+    referrals.map(async (r) => {
+      const clientPackage = await prisma.clientPackage.findFirst({
+        where: { clientId: r.clientId, status: "active" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, packageId: true, amountDue: true, package: { select: { name: true } } },
+      });
+
+      const amountDue = clientPackage ? Number(clientPackage.amountDue) : 0;
+      const commissionAmount = r.isActive ? amountDue * 0.15 : 0;
+
+      return {
+        ...r,
+        clientPackage: clientPackage
+          ? { id: clientPackage.id, packageName: clientPackage.package.name, amountDue }
+          : null,
+        commissionAmount,
+      };
+    })
+  );
+
+  return apiSuccess(enriched);
 }
 
 // ─── POST /api/instructors/[id]/referrals ─────────────────────────────────────
@@ -93,7 +115,7 @@ export async function PATCH(
   if (actor?.role !== "founder") return apiError("Forbidden", 403);
 
   const body = await request.json();
-  const { referralId, isActive } = body;
+  const { referralId, isActive, notes, referralDate } = body;
 
   if (!referralId || isActive === undefined) {
     return apiError("referralId and isActive are required");
@@ -104,9 +126,13 @@ export async function PATCH(
     return apiError("Referral not found", 404);
   }
 
+  const updateData: { isActive: boolean; notes?: string | null; referralDate?: Date } = { isActive };
+  if (notes !== undefined) updateData.notes = notes ?? null;
+  if (referralDate) updateData.referralDate = new Date(referralDate);
+
   const updated = await prisma.instructorReferral.update({
     where: { id: referralId },
-    data: { isActive },
+    data: updateData,
     include: {
       client: { select: { id: true, fullName: true, email: true } },
     },
@@ -117,7 +143,7 @@ export async function PATCH(
     action: AUDIT_ACTIONS.REFERRAL_STATUS_UPDATED,
     entityType: "instructor_referral",
     entityId: referralId,
-    newValue: { isActive },
+    newValue: { isActive, notes: updateData.notes, referralDate: updateData.referralDate },
   });
 
   return apiSuccess(updated);

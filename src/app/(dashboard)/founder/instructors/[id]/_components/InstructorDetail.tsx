@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { cn, formatTime } from "@/lib/utils";
+import { cn, formatTime, formatCurrency } from "@/lib/utils";
 import {
   Phone, Mail, Calendar, Pencil, X, Plus, ChevronLeft,
   Wallet, Users, TrendingUp, CheckCircle2, AlertCircle,
@@ -49,6 +49,8 @@ interface Referral {
   referralDate: string;
   notes: string | null;
   client: { id: string; fullName: string; email: string; status: string };
+  clientPackage?: { id: string; packageName: string; amountDue: number } | null;
+  commissionAmount?: number;
 }
 
 interface Instructor {
@@ -138,6 +140,10 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
   // Add referral modal
   const [showReferralForm, setShowReferralForm] = useState(false);
   const [referralForm, setReferralForm] = useState({ clientId: "", referralDate: format(new Date(), "yyyy-MM-dd"), notes: "" });
+
+  // Inline referral edit
+  const [editingReferralId, setEditingReferralId] = useState<string | null>(null);
+  const [referralEditForm, setReferralEditForm] = useState({ referralDate: "", notes: "", isActive: true });
 
   // Attendance modal
   const [attendanceSession, setAttendanceSession] = useState<ClassSession | null>(null);
@@ -293,6 +299,35 @@ export function InstructorDetail({ instructor: initial, allClients }: Props) {
     } else {
       const d = await res.json(); toast.error(d.error ?? "Failed");
     }
+  }
+
+  function openReferralEdit(r: Referral) {
+    setEditingReferralId(r.id);
+    setReferralEditForm({
+      referralDate: format(parseISO(r.referralDate), "yyyy-MM-dd"),
+      notes: r.notes ?? "",
+      isActive: r.isActive,
+    });
+  }
+
+  async function saveReferralEdit(referralId: string) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/instructors/${instructor.id}/referrals`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          referralId,
+          isActive: referralEditForm.isActive,
+          notes: referralEditForm.notes.trim() || null,
+          referralDate: referralEditForm.referralDate,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); toast.error(d.error ?? "Failed"); return; }
+      toast.success("Referral updated");
+      setEditingReferralId(null);
+      router.refresh();
+    } finally { setSaving(false); }
   }
 
   async function saveAttendance(e: React.FormEvent) {

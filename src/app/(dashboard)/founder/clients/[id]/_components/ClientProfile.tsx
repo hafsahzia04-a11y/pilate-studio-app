@@ -248,6 +248,8 @@ export function ClientProfile({ client }: Props) {
   const [guestPassConfirm, setGuestPassConfirm] = useState(false);
   const [drinkConfirm, setDrinkConfirm] = useState(false);
   const [perkLoading, setPerkLoading] = useState<"guest" | "drink" | null>(null);
+  const [markAsLeftConfirm, setMarkAsLeftConfirm] = useState(false);
+  const [markAsLeftLoading, setMarkAsLeftLoading] = useState(false);
 
   // Payment form state
   const [payAmount, setPayAmount] = useState("");
@@ -360,6 +362,26 @@ export function ClientProfile({ client }: Props) {
     }
   }
 
+  async function handleMarkAsLeft() {
+    setMarkAsLeftLoading(true);
+    try {
+      const res = await fetch(`/api/clients/${client.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "left" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      toast.success(`${client.fullName} marked as left`);
+      setMarkAsLeftConfirm(false);
+      router.push("/founder/clients");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setMarkAsLeftLoading(false);
+    }
+  }
+
   const tags = client.clientProfile?.tags ?? [];
   const now = new Date();
   const upcomingBookings = client.bookings.filter(
@@ -434,6 +456,15 @@ export function ClientProfile({ client }: Props) {
             Edit Profile
           </Button>
         </Link>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+          onClick={() => setMarkAsLeftConfirm(true)}
+        >
+          <X className="h-3.5 w-3.5" />
+          Mark as Left
+        </Button>
       </div>
 
       {/* Overdue alert banner */}
@@ -884,6 +915,17 @@ export function ClientProfile({ client }: Props) {
         confirmLabel="Yes, Mark Used"
         onConfirm={() => handlePerk("use_drink")}
         loading={perkLoading === "drink"}
+      />
+
+      {/* Mark as Left confirm */}
+      <ConfirmDialog
+        open={markAsLeftConfirm}
+        onOpenChange={setMarkAsLeftConfirm}
+        title="Mark Client as Left"
+        description={`This will set ${client.fullName}'s status to "left". They will no longer appear as an active client.`}
+        confirmLabel="Yes, Mark as Left"
+        onConfirm={handleMarkAsLeft}
+        loading={markAsLeftLoading}
       />
     </div>
   );

@@ -253,5 +253,43 @@ export async function PATCH(
     return apiSuccess({ ...updated, amountPaid: Number(updated.amountPaid), amountDue: Number(updated.amountDue) });
   }
 
-  return apiError("Invalid action. Valid actions: use_guest_pass, use_drink, record_payment, renew, extend");
+  // ─── Set perk quantities manually ─────────────────────────────────────────
+  if (action === "set_perks") {
+    const { guestPassesRemaining, drinksRemaining } = body;
+
+    const updateData: { guestPassesRemaining?: number; drinksRemaining?: number } = {};
+
+    if (guestPassesRemaining !== undefined) {
+      const val = Number(guestPassesRemaining);
+      if (!Number.isInteger(val) || val < 0) return apiError("guestPassesRemaining must be a non-negative integer");
+      updateData.guestPassesRemaining = val;
+    }
+
+    if (drinksRemaining !== undefined) {
+      const val = Number(drinksRemaining);
+      if (!Number.isInteger(val) || val < 0) return apiError("drinksRemaining must be a non-negative integer");
+      updateData.drinksRemaining = val;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return apiError("At least one of guestPassesRemaining or drinksRemaining is required");
+    }
+
+    const updated = await prisma.clientPackage.update({
+      where: { id: params.id },
+      data: updateData,
+    });
+
+    await audit({
+      actorId: user.id,
+      action: AUDIT_ACTIONS.PRODUCT_REDEEMED,
+      entityType: "client_package",
+      entityId: params.id,
+      newValue: { type: "set_perks", clientId: cp.clientId, ...updateData },
+    });
+
+    return apiSuccess({ ...updated, amountPaid: Number(updated.amountPaid), amountDue: Number(updated.amountDue) });
+  }
+
+  return apiError("Invalid action. Valid actions: use_guest_pass, use_drink, record_payment, renew, extend, set_perks");
 }
