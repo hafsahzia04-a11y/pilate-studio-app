@@ -68,6 +68,7 @@ export const AUDIT_ACTIONS = {
 
   // Payments
   PAYMENT_RECORDED: "payment.recorded",
+  PAYMENT_UPDATED: "payment.updated",
   PAYMENT_REFUNDED: "payment.refunded",
   PAYMENT_STATUS_CHANGED: "payment.status_changed",
 

@@ -1,14 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X, Calendar, Trash2 } from "lucide-react";
+import { startOfMonth } from "date-fns";
+import {
+  DollarSign, AlertTriangle, Clock, Plus, CheckCircle, X,
+  Calendar, Trash2, Pencil,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { cn, formatCurrency, formatDate, paymentStatusLabel } from "@/lib/utils";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Payment {
   id: string; clientName: string; clientEmail: string; packageName: string;
@@ -38,12 +44,8 @@ interface ClientWithPackages {
 }
 
 interface AvailablePackage {
-  id: string;
-  name: string;
-  type: string;
-  price: number;
-  classCredits: number;
-  validityDays: number;
+  id: string; name: string; type: string;
+  price: number; classCredits: number; validityDays: number;
 }
 
 interface Props {
@@ -54,7 +56,7 @@ interface Props {
   allClients: ClientWithPackages[];
   allPackages: AvailablePackage[];
   dropInPrice: number;
-  totalCollected: number;
+  totalCollected: number;       // server-computed — used as initial fallback only
   totalOutstanding: number;
   overdueCount: number;
   dueTomorrowCount: number;
@@ -63,8 +65,6 @@ interface Props {
 type Tab = "all" | "overdue" | "due_tomorrow" | "expiring";
 
 const inputCls = "w-full h-10 px-3 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100";
-// Package option prefixes: existing client packages use their UUID directly.
-// New package purchases are prefixed with "new:" followed by the package ID.
 const NEW_PKG_PREFIX = "new:";
 
 function paymentBadge(status: string): "sage" | "danger" | "warning" | "default" | "blue" {
@@ -74,17 +74,41 @@ function paymentBadge(status: string): "sage" | "danger" | "warning" | "default"
   return map[status] ?? "default";
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function PaymentsManager({
-  payments, overduePackages, expiringPackages, dueTomorrowPackages,
-  allClients, allPackages, dropInPrice, totalCollected, totalOutstanding, overdueCount, dueTomorrowCount,
+  payments: initialPayments,
+  overduePackages, expiringPackages, dueTomorrowPackages,
+  allClients, allPackages, dropInPrice,
+  totalCollected: serverTotalCollected,
+  totalOutstanding, overdueCount, dueTomorrowCount,
 }: Props) {
   const router = useRouter();
+
+  // ── Local mutable state (source of truth for totals) ──────────────────────
+  const [localPayments, setLocalPayments] = useState(initialPayments);
   const [tab, setTab] = useState<Tab>("all");
-  const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [localPayments, setLocalPayments] = useState(payments);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ── Derived totals — always recomputed from current localPayments ─────────
+  const monthStart = startOfMonth(new Date());
+  const computedCollected = useMemo(
+    () =>
+      localPayments
+        .filter(
+          (p) =>
+            p.status === "paid" &&
+            p.paidAt &&
+            new Date(p.paidAt) >= monthStart
+        )
+        .reduce((sum, p) => sum + p.amount, 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localPayments]
+  );
+
+  // ── Record payment modal ───────────────────────────────────────────────────
+  const [modalOpen, setModalOpen] = useState(false);
   const [clientId, setClientId] = useState("");
   const [packageOption, setPackageOption] = useState("");
   const [amount, setAmount] = useState("");
@@ -92,21 +116,14 @@ export function PaymentsManager({
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
 
-  const selectedClient = allClients.find((c) => c.id === clientId) ?? null;
+  // ── Edit payment modal ────────────────────────────────────────────────────
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [editAmount, setEditAmount] = useState("");
+  const [editMethod, setEditMethod] = useState("cash");
+  const [editNotes, setEditNotes] = useState("");
+  const [editPaidAt, setEditPaidAt] = useState("");
 
-  async function deletePayment(id: string) {
-    if (!confirm("Delete this payment record? This will mark it as refunded and reverse the amount from the client's package balance.")) return;
-    setDeletingId(id);
-    try {
-      const res = await fetch(`/api/payments/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Failed to delete"); return; }
-      setLocalPayments((prev) => prev.filter((p) => p.id !== id));
-      toast.success("Payment deleted");
-    } finally {
-      setDeletingId(null);
-    }
-  }
+  const selectedClient = allClients.find((c) => c.id === clientId) ?? null;
 
   function resetForm() {
     setClientId(""); setPackageOption(""); setAmount("");
@@ -128,12 +145,10 @@ export function PaymentsManager({
   function onPackageChange(option: string) {
     setPackageOption(option);
     if (option.startsWith(NEW_PKG_PREFIX)) {
-      // New package purchase — pre-fill with full package price
       const pkgId = option.slice(NEW_PKG_PREFIX.length);
       const pkg = allPackages.find((p) => p.id === pkgId);
       if (pkg) setAmount(String(pkg.price));
     } else if (option) {
-      // Existing client package — pre-fill outstanding amount
       const pkg = selectedClient?.packages.find((p) => p.id === option);
       if (pkg) setAmount(String(pkg.outstanding > 0 ? pkg.outstanding : pkg.amountDue));
     } else {
@@ -141,6 +156,62 @@ export function PaymentsManager({
     }
   }
 
+  // ── Delete payment ─────────────────────────────────────────────────────────
+  async function deletePayment(id: string) {
+    if (!confirm("Delete this payment? It will be marked as refunded and the amount will be reversed from the client's package balance.")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/payments/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Failed to delete"); return; }
+      setLocalPayments((prev) => prev.filter((p) => p.id !== id));
+      toast.success("Payment deleted");
+      router.refresh(); // re-runs server component to sync overdueCount, outstanding etc.
+    } finally { setDeletingId(null); }
+  }
+
+  // ── Edit payment ───────────────────────────────────────────────────────────
+  function openEdit(p: Payment) {
+    setEditingPayment(p);
+    setEditAmount(String(p.amount));
+    setEditMethod(p.paymentMethod);
+    setEditNotes(p.notes ?? "");
+    setEditPaidAt(p.paidAt ? p.paidAt.slice(0, 10) : "");
+  }
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingPayment) return;
+    const amtNum = Number(editAmount);
+    if (isNaN(amtNum) || amtNum <= 0) { toast.error("Enter a valid amount"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/payments/${editingPayment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: amtNum,
+          paymentMethod: editMethod,
+          notes: editNotes.trim() || null,
+          paidAt: editPaidAt ? new Date(editPaidAt).toISOString() : editingPayment.paidAt,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Failed to update"); return; }
+      setLocalPayments((prev) =>
+        prev.map((p) =>
+          p.id === editingPayment.id
+            ? { ...p, amount: amtNum, paymentMethod: editMethod, notes: editNotes.trim() || null, paidAt: editPaidAt ? new Date(editPaidAt).toISOString() : p.paidAt }
+            : p
+        )
+      );
+      toast.success("Payment updated");
+      setEditingPayment(null);
+      router.refresh();
+    } finally { setSaving(false); }
+  }
+
+  // ── Record payment ─────────────────────────────────────────────────────────
   async function submitPayment(e: React.FormEvent) {
     e.preventDefault();
     if (!clientId) { toast.error("Select a client"); return; }
@@ -149,34 +220,47 @@ export function PaymentsManager({
     setSaving(true);
     try {
       if (packageOption.startsWith(NEW_PKG_PREFIX)) {
-        // Sell a new package to this client (creates ClientPackage + Payment in one call)
         const pkgId = packageOption.slice(NEW_PKG_PREFIX.length);
         const res = await fetch(`/api/packages/${pkgId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId,
-            amountPaid: Number(amount),
-            paymentMethod,
-            notes: notes.trim() || null,
-          }),
+          body: JSON.stringify({ clientId, amountPaid: Number(amount), paymentMethod, notes: notes.trim() || null }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed to assign package");
         toast.success("Package assigned and payment recorded");
       } else {
-        // Record payment against an existing client package
-        const body: Record<string, unknown> = {
-          clientId, amount: Number(amount), paymentMethod,
-          referenceNumber: referenceNumber.trim() || null,
-          notes: notes.trim() || null,
-          clientPackageId: packageOption,
-        };
         const res = await fetch("/api/payments", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId, amount: Number(amount), paymentMethod,
+            referenceNumber: referenceNumber.trim() || null,
+            notes: notes.trim() || null,
+            clientPackageId: packageOption,
+          }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed");
+        // Add new payment to local state immediately
+        const client = allClients.find((c) => c.id === clientId);
+        const pkg = client?.packages.find((p) => p.id === packageOption);
+        const newPayment: Payment = {
+          id: data.data?.id ?? String(Date.now()),
+          clientName: client?.fullName ?? "",
+          clientEmail: client?.email ?? "",
+          packageName: pkg?.packageName ?? "",
+          amount: Number(amount),
+          netAmount: Number(amount),
+          status: "paid",
+          paymentMethod,
+          dueDate: null,
+          paidAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          referenceNumber: referenceNumber.trim() || null,
+          notes: notes.trim() || null,
+        };
+        setLocalPayments((prev) => [newPayment, ...prev]);
         toast.success("Payment recorded");
       }
       setModalOpen(false); resetForm(); router.refresh();
@@ -185,8 +269,9 @@ export function PaymentsManager({
     } finally { setSaving(false); }
   }
 
+  // ── Tabs config ────────────────────────────────────────────────────────────
   const tabs: { label: string; value: Tab; count?: number }[] = [
-    { label: "All Payments", value: "all", count: payments.length },
+    { label: "All Payments", value: "all", count: localPayments.filter(p => p.status !== "refunded").length },
     { label: "Overdue", value: "overdue", count: overduePackages.length },
     { label: "Due Tomorrow", value: "due_tomorrow", count: dueTomorrowPackages.length },
     { label: "Expiring Soon", value: "expiring", count: expiringPackages.length },
@@ -216,9 +301,9 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* Stats */}
+      {/* Stats — computedCollected is derived from localPayments so always accurate */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard title="Collected This Month" value={formatCurrency(totalCollected)} icon={<DollarSign className="h-5 w-5" />} color="sage" />
+        <StatCard title="Collected This Month" value={formatCurrency(computedCollected)} icon={<DollarSign className="h-5 w-5" />} color="sage" />
         <StatCard title="Outstanding Balance" value={formatCurrency(totalOutstanding)} icon={<AlertTriangle className="h-5 w-5" />} color={totalOutstanding > 0 ? "red" : "stone"} />
         <StatCard title="Overdue Accounts" value={overdueCount} icon={<Clock className="h-5 w-5" />} color={overdueCount > 0 ? "amber" : "stone"} />
       </div>
@@ -240,10 +325,10 @@ export function PaymentsManager({
         ))}
       </div>
 
-      {/* All payments */}
+      {/* ── All payments ─────────────────────────────────────────────────────── */}
       {tab === "all" && (
         <Card className="overflow-hidden">
-          {localPayments.length === 0 ? (
+          {localPayments.filter(p => p.status !== "refunded").length === 0 ? (
             <div className="p-12 text-center">
               <CheckCircle className="h-8 w-8 text-stone-300 mx-auto mb-2" />
               <p className="text-stone-400 text-sm">No payments recorded yet.</p>
@@ -259,7 +344,7 @@ export function PaymentsManager({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {localPayments.map((p) => (
+                  {localPayments.filter(p => p.status !== "refunded").map((p) => (
                     <tr key={p.id} className={cn("transition-colors",
                       p.status === "overdue" ? "bg-red-50 hover:bg-red-100" : "hover:bg-cream-50")}>
                       <td className="px-4 py-3">
@@ -275,14 +360,23 @@ export function PaymentsManager({
                       </td>
                       <td className="px-4 py-3 text-stone-500 text-xs">{p.paidAt ? formatDate(p.paidAt) : "—"}</td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => deletePayment(p.id)}
-                          disabled={deletingId === p.id}
-                          className="text-stone-300 hover:text-red-500 transition-colors disabled:opacity-50"
-                          title="Delete payment"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center gap-2 justify-end">
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="text-stone-300 hover:text-sage-600 transition-colors"
+                            title="Edit payment"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => deletePayment(p.id)}
+                            disabled={deletingId === p.id}
+                            className="text-stone-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                            title="Delete payment"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -293,7 +387,7 @@ export function PaymentsManager({
         </Card>
       )}
 
-      {/* Overdue */}
+      {/* ── Overdue ───────────────────────────────────────────────────────────── */}
       {tab === "overdue" && (
         <div className="space-y-3">
           {overduePackages.length === 0 ? (
@@ -323,7 +417,7 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* Due Tomorrow */}
+      {/* ── Due Tomorrow ──────────────────────────────────────────────────────── */}
       {tab === "due_tomorrow" && (
         <div className="space-y-3">
           {dueTomorrowPackages.length === 0 ? (
@@ -353,7 +447,7 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* Expiring */}
+      {/* ── Expiring ──────────────────────────────────────────────────────────── */}
       {tab === "expiring" && (
         <div className="space-y-3">
           {expiringPackages.length === 0 ? (
@@ -378,103 +472,142 @@ export function PaymentsManager({
         </div>
       )}
 
-      {/* Record Payment Modal */}
+      {/* ── Record Payment Modal ──────────────────────────────────────────────── */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
-              <div>
-                <h2 className="text-base font-semibold text-stone-900">Record Payment</h2>
-                <p className="text-xs text-stone-400 mt-0.5">Select client and package</p>
-              </div>
-              <button onClick={() => { setModalOpen(false); resetForm(); }} className="text-stone-400 hover:text-stone-600">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={submitPayment} className="px-6 py-5 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">Client *</label>
-                <select className={inputCls} value={clientId} onChange={(e) => onClientChange(e.target.value)} required>
-                  <option value="">— select client —</option>
-                  {allClients.map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
-                </select>
-              </div>
-
-              {clientId && (
-                <div>
-                  <label className="block text-xs font-medium text-stone-600 mb-1">Package *</label>
-                  <select className={inputCls} value={packageOption} onChange={(e) => onPackageChange(e.target.value)} required>
-                    <option value="">— select package —</option>
-                    {selectedClient && selectedClient.packages.length > 0 && (
-                      <optgroup label="Existing Active Packages">
-                        {selectedClient.packages.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.packageName}{p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — fully paid"}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {allPackages.length > 0 && (
-                      <optgroup label="New Purchase (assign + record payment)">
-                        {allPackages.map((p) => (
-                          <option key={p.id} value={`${NEW_PKG_PREFIX}${p.id}`}>
-                            {p.name} — {formatCurrency(p.price)} · {p.classCredits} classes · {p.validityDays}d
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-                  {packageOption.startsWith(NEW_PKG_PREFIX) && (() => {
-                    const pkgId = packageOption.slice(NEW_PKG_PREFIX.length);
-                    const pkg = allPackages.find((p) => p.id === pkgId);
-                    return pkg ? (
-                      <p className="text-xs text-sage-700 mt-1 bg-sage-50 rounded-lg px-3 py-1.5">
-                        New {pkg.name} will be assigned to {selectedClient?.fullName} — {pkg.classCredits} classes, valid {pkg.validityDays} days.
-                      </p>
-                    ) : null;
-                  })()}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">Amount (PKR) *</label>
-                <input type="number" step="0.01" min="0" className={inputCls} value={amount}
-                  onChange={(e) => setAmount(e.target.value)} placeholder="0" required />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">Payment Method</label>
-                <select className={inputCls} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-                  <option value="cash">Cash</option>
-                  <option value="card">Card</option>
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="online">Online</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">Reference <span className="text-stone-400">(optional)</span></label>
-                <input type="text" placeholder="e.g. TXN123456" className={inputCls}
-                  value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-stone-600 mb-1">Notes <span className="text-stone-400">(optional)</span></label>
-                <textarea rows={2} placeholder="Any additional notes…"
-                  className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100 resize-none"
-                  value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </div>
-
-              <div className="flex gap-3 pt-2 border-t border-stone-100">
-                <Button type="button" variant="outline" className="flex-1" onClick={() => { setModalOpen(false); resetForm(); }}>Cancel</Button>
-                <Button type="submit" className="flex-1" loading={saving}>{saving ? "Recording…" : "Record Payment"}</Button>
-              </div>
-            </form>
+        <PaymentModal title="Record Payment" onClose={() => { setModalOpen(false); resetForm(); }} onSubmit={submitPayment} saving={saving}>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Client *</label>
+            <select className={inputCls} value={clientId} onChange={(e) => onClientChange(e.target.value)} required>
+              <option value="">— select client —</option>
+              {allClients.map((c) => <option key={c.id} value={c.id}>{c.fullName}</option>)}
+            </select>
           </div>
-        </div>
+
+          {clientId && (
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Package *</label>
+              <select className={inputCls} value={packageOption} onChange={(e) => onPackageChange(e.target.value)} required>
+                <option value="">— select package —</option>
+                {selectedClient && selectedClient.packages.length > 0 && (
+                  <optgroup label="Existing Active Packages">
+                    {selectedClient.packages.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.packageName}{p.outstanding > 0 ? ` — ${formatCurrency(p.outstanding)} due` : " — fully paid"}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {allPackages.length > 0 && (
+                  <optgroup label="New Purchase (assign + record payment)">
+                    {allPackages.map((p) => (
+                      <option key={p.id} value={`${NEW_PKG_PREFIX}${p.id}`}>
+                        {p.name} — {formatCurrency(p.price)} · {p.classCredits} classes · {p.validityDays}d
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {packageOption.startsWith(NEW_PKG_PREFIX) && (() => {
+                const pkg = allPackages.find((p) => p.id === packageOption.slice(NEW_PKG_PREFIX.length));
+                return pkg ? (
+                  <p className="text-xs text-sage-700 mt-1 bg-sage-50 rounded-lg px-3 py-1.5">
+                    New {pkg.name} will be assigned — {pkg.classCredits} classes, valid {pkg.validityDays} days.
+                  </p>
+                ) : null;
+              })()}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Amount (PKR) *</label>
+            <input type="number" step="0.01" min="0" className={inputCls} value={amount}
+              onChange={(e) => setAmount(e.target.value)} placeholder="0" required />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Payment Method</label>
+            <select className={inputCls} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="online">Online</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Reference <span className="text-stone-400">(optional)</span></label>
+            <input type="text" placeholder="e.g. TXN123456" className={inputCls}
+              value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Notes <span className="text-stone-400">(optional)</span></label>
+            <textarea rows={2} placeholder="Any additional notes…"
+              className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100 resize-none"
+              value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+        </PaymentModal>
       )}
+
+      {/* ── Edit Payment Modal ────────────────────────────────────────────────── */}
+      {editingPayment && (
+        <PaymentModal title={`Edit — ${editingPayment.clientName}`} onClose={() => setEditingPayment(null)} onSubmit={submitEdit} saving={saving} submitLabel="Save Changes">
+          <div className="bg-stone-50 rounded-xl px-3 py-2 text-xs text-stone-500 space-y-0.5">
+            <p><span className="font-medium">Package:</span> {editingPayment.packageName}</p>
+            <p><span className="font-medium">Original amount:</span> {formatCurrency(editingPayment.amount)}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Amount (PKR) *</label>
+            <input type="number" step="0.01" min="0" className={inputCls} value={editAmount}
+              onChange={(e) => setEditAmount(e.target.value)} required />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Payment Method</label>
+            <select className={inputCls} value={editMethod} onChange={(e) => setEditMethod(e.target.value)}>
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="online">Online</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Paid On</label>
+            <input type="date" className={inputCls} value={editPaidAt}
+              onChange={(e) => setEditPaidAt(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Notes</label>
+            <textarea rows={2} className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:outline-none focus:border-sage-400 resize-none"
+              value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+          </div>
+        </PaymentModal>
+      )}
+    </div>
+  );
+}
+
+// ─── Reusable modal shell ──────────────────────────────────────────────────────
+
+function PaymentModal({
+  title, onClose, onSubmit, saving, submitLabel = "Record Payment", children,
+}: {
+  title: string; onClose: () => void; onSubmit: (e: React.FormEvent) => void;
+  saving: boolean; submitLabel?: string; children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
+          <h2 className="text-base font-semibold text-stone-900">{title}</h2>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600"><X className="h-5 w-5" /></button>
+        </div>
+        <form onSubmit={onSubmit} className="px-6 py-5 space-y-4">
+          {children}
+          <div className="flex gap-3 pt-2 border-t border-stone-100">
+            <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
+            <Button type="submit" className="flex-1" loading={saving}>{saving ? "Saving…" : submitLabel}</Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
