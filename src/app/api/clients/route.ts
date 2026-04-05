@@ -81,13 +81,21 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   const {
-    email, fullName, phone,
+    fullName, phone,
     dateOfBirth, emergencyContactName, emergencyContactPhone,
     medicalNotes, tags = [], staffNotes,
     temporaryPassword,
   } = body;
+  let { email } = body;
 
-  if (!email || !fullName) return apiError("email and fullName are required");
+  if (!fullName) return apiError("fullName is required");
+  if (!phone && !email) return apiError("At least phone number or email is required");
+
+  // Generate a placeholder email if none provided (Supabase Auth requires an email)
+  if (!email) {
+    const sanitized = (phone as string).replace(/[^0-9]/g, "");
+    email = `${sanitized}@noemail.movementstudio.app`;
+  }
 
   // Create auth user via admin client
   const adminSupabase = createAdminClient();

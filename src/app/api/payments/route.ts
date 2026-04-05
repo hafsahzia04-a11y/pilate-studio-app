@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
   const {
     clientId, amount, paymentMethod,
     discountApplied = 0, notes, referenceNumber,
-    isDropIn = false,
+    isDropIn = false, nextDueDate,
   } = body;
   let { clientPackageId } = body;
 
@@ -138,6 +138,7 @@ export async function POST(request: NextRequest) {
             amountPaid: newAmountPaid,
             paymentStatus: outstanding <= 0 ? "paid" : "partial",
             status: "active",
+            ...(nextDueDate && { paymentDueDate: new Date(nextDueDate) }),
           },
         });
       }

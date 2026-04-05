@@ -53,14 +53,13 @@ export function Step1Details({ data, onChange, onNext }: Props) {
         {/* Email */}
         <div className="space-y-1.5">
           <label className="text-sm font-medium text-stone-700">
-            Email Address <span className="text-red-400">*</span>
+            Email Address <span className="text-stone-400 text-xs font-normal">(optional)</span>
           </label>
           <input
             type="email"
             placeholder="hana@example.com"
             {...register("email", {
-              required: "Email is required",
-              pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: "Invalid email" },
+              pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: "Invalid email format" },
             })}
             className={inputCls}
           />

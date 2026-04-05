@@ -115,6 +115,7 @@ export function PaymentsManager({
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [nextDueDate, setNextDueDate] = useState("");
 
   // ── Edit payment modal ────────────────────────────────────────────────────
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -127,7 +128,7 @@ export function PaymentsManager({
 
   function resetForm() {
     setClientId(""); setPackageOption(""); setAmount("");
-    setPaymentMethod("cash"); setReferenceNumber(""); setNotes("");
+    setPaymentMethod("cash"); setReferenceNumber(""); setNotes(""); setNextDueDate("");
   }
 
   function openForOverdue(cp: OverduePackage) {
@@ -238,6 +239,7 @@ export function PaymentsManager({
             referenceNumber: referenceNumber.trim() || null,
             notes: notes.trim() || null,
             clientPackageId: packageOption,
+            nextDueDate: nextDueDate || null,
           }),
         });
         const data = await res.json();
@@ -537,6 +539,11 @@ export function PaymentsManager({
             <label className="block text-xs font-medium text-stone-600 mb-1">Reference <span className="text-stone-400">(optional)</span></label>
             <input type="text" placeholder="e.g. TXN123456" className={inputCls}
               value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">Next Payment Due Date <span className="text-stone-400">(optional)</span></label>
+            <input type="date" className={inputCls} value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
+            <p className="text-xs text-stone-400 mt-1">Set this to flag the client&apos;s payment as due on that date next month.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-stone-600 mb-1">Notes <span className="text-stone-400">(optional)</span></label>

@@ -235,7 +235,7 @@ export function ClientsTable({ clients }: Props) {
             className="w-full h-10 pl-9 pr-4 rounded-xl border border-stone-200 bg-white text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:border-sage-400 focus:ring-2 focus:ring-sage-100"
           />
         </div>
-        <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-wrap min-w-0">
           <Filter className="h-4 w-4 text-stone-400 flex-shrink-0" />
           {filterOptions.map((opt) => (
             <button
