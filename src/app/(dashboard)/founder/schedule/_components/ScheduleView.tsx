@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { format, addDays, startOfDay, isSameDay } from "date-fns";
 import { cn, formatTime, occupancyColor } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
@@ -73,6 +73,63 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
   const [showAddForm, setShowAddForm] = useState(false);
   const [editSession, setEditSession] = useState<Session | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadingWeek, setLoadingWeek] = useState(false);
+
+  // Track which weeks have been loaded so we don't re-fetch unnecessarily
+  const loadedWeeks = useRef(new Set<string>([format(startOfDay(new Date()), "yyyy-MM-dd")]));
+
+  const fetchWeek = useCallback(async (from: Date) => {
+    const key = format(from, "yyyy-MM-dd");
+    if (loadedWeeks.current.has(key)) return;
+    loadedWeeks.current.add(key);
+    setLoadingWeek(true);
+    try {
+      const to = addDays(from, 7);
+      const res = await fetch(
+        `/api/classes?from=${from.toISOString()}&to=${to.toISOString()}&status=all`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const fetched: Session[] = (data.data ?? []).map((s: {
+        id: string; title: string; startTime: string; endTime: string;
+        durationMins: number; capacity: number; room?: string | null;
+        status: string; isWorkshop: boolean; description?: string | null;
+        category: { name: string; color: string };
+        instructor: { id: string; fullName: string };
+        substituteInstructor?: { id: string; fullName: string } | null;
+        _count?: { bookings?: number; waitlist?: number };
+        bookedCount?: number; waitlistCount?: number;
+      }) => ({
+        ...s,
+        bookedCount: s.bookedCount ?? s._count?.bookings ?? 0,
+        waitlistCount: s.waitlistCount ?? s._count?.waitlist ?? 0,
+        spotsLeft: Math.max(0, s.capacity - (s.bookedCount ?? s._count?.bookings ?? 0)),
+        isFull: (s.bookedCount ?? s._count?.bookings ?? 0) >= s.capacity,
+      }));
+      // Merge: replace any existing sessions in this week range, add new ones
+      setSessions((prev) => {
+        const fromT = from.getTime();
+        const toT = to.getTime();
+        const outside = prev.filter((s) => {
+          const t = new Date(s.startTime).getTime();
+          return t < fromT || t >= toT;
+        });
+        return [...outside, ...fetched];
+      });
+    } finally {
+      setLoadingWeek(false);
+    }
+  }, []);
+
+  // Fetch whenever weekStart changes (skip the initial week — already server-loaded)
+  useEffect(() => {
+    fetchWeek(weekStart);
+  }, [weekStart, fetchWeek]);
+
+  function navigateWeek(direction: -1 | 1) {
+    setWeekStart((prev) => addDays(prev, direction * 7));
+    setSelectedDay(0);
+  }
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const selectedDate = days[selectedDay];
@@ -334,17 +391,17 @@ export function ScheduleView({ sessions: initialSessions, instructors, categorie
       {/* Top bar: nav + view toggle */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon-sm" onClick={() => setWeekStart(addDays(weekStart, -7))}>
+          <Button variant="outline" size="icon-sm" onClick={() => navigateWeek(-1)} disabled={loadingWeek}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm font-medium text-stone-600 min-w-[160px] text-center">
-            {format(weekStart, "d MMM")} – {format(addDays(weekStart, 6), "d MMM yyyy")}
+            {loadingWeek ? "Loading…" : `${format(weekStart, "d MMM")} – ${format(addDays(weekStart, 6), "d MMM yyyy")}`}
           </span>
-          <Button variant="outline" size="icon-sm" onClick={() => setWeekStart(addDays(weekStart, 7))}>
+          <Button variant="outline" size="icon-sm" onClick={() => navigateWeek(1)} disabled={loadingWeek}>
             <ChevronRight className="h-4 w-4" />
           </Button>
           <button
-            onClick={() => setWeekStart(startOfDay(new Date()))}
+            onClick={() => { setWeekStart(startOfDay(new Date())); setSelectedDay(0); }}
             className="text-xs text-sage-600 hover:underline ml-1"
           >
             Today
