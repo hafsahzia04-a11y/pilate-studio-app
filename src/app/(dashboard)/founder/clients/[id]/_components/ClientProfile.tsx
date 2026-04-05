@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   ArrowLeft, User, Package2, CreditCard, Calendar, Coffee, Users,
   Percent, Clock, ChevronDown, CheckCircle2, AlertCircle, RefreshCw,
-  PlusCircle, Edit2, History, MoreHorizontal, X
+  PlusCircle, Edit2, History, MoreHorizontal, X, Pencil
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
