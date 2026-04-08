@@ -95,10 +95,15 @@ export async function POST(request: NextRequest) {
   if (actor?.role !== "founder") return apiError("Only founders can add instructors", 403);
 
   const body = await request.json();
-  const { fullName, email, phone, specializations, bio, payoutType, payoutRate, salary, salaryDueDay, commissionPercent, startDate, notes } = body;
+  const { fullName, phone, specializations, bio, payoutType, payoutRate, salary, salaryDueDay, commissionPercent, startDate, notes } = body;
+  let { email } = body;
 
-  if (!fullName || !email) {
-    return apiError("fullName and email are required");
+  if (!fullName) return apiError("fullName is required");
+
+  // Generate placeholder email if none provided
+  if (!email || !email.trim()) {
+    const base = phone ? (phone as string).replace(/[^0-9]/g, "") : fullName.toLowerCase().replace(/\s+/g, ".");
+    email = `${base}.instructor@noemail.movementstudio.app`;
   }
 
   // Create Supabase auth user

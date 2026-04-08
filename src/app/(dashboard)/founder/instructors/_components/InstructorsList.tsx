@@ -112,8 +112,8 @@ export function InstructorsList({ instructors: initialInstructors, summary }: Pr
 
   async function submitAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!addForm.fullName.trim() || !addForm.email.trim()) {
-      toast.error("Name and email are required");
+    if (!addForm.fullName.trim()) {
+      toast.error("Full name is required");
       return;
     }
 
@@ -326,8 +326,8 @@ export function InstructorsList({ instructors: initialInstructors, summary }: Pr
                   <input className={inputCls} value={addForm.fullName} onChange={(e) => setF("fullName", e.target.value)} placeholder="Sara Ahmed" required />
                 </div>
                 <div>
-                  <label className={labelCls}>Email *</label>
-                  <input type="email" className={inputCls} value={addForm.email} onChange={(e) => setF("email", e.target.value)} placeholder="sara@studio.com" required />
+                  <label className={labelCls}>Email <span className="text-stone-400 font-normal">(optional)</span></label>
+                  <input type="email" className={inputCls} value={addForm.email} onChange={(e) => setF("email", e.target.value)} placeholder="sara@studio.com" />
                 </div>
               </div>
 

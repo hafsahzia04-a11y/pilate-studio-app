@@ -213,7 +213,7 @@ export function PackagesManager({ packages }: Props) {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-stone-700">Price (AED)</label>
+              <label className="text-sm font-medium text-stone-700">Price (PKR)</label>
               <input
                 type="number"
                 step="0.01"
